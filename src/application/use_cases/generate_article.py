@@ -1,4 +1,7 @@
+
 import uuid
+from sqlalchemy.orm.attributes import flag_modified
+
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.competitors import Article
 from src.infrastructure.gateways.kie_api import KieApiGateway
@@ -17,17 +20,20 @@ class GenerateArticleUseCase:
 
             prompt = f"Напиши SEO-статью на тему '{topic}'. Используй контекст конкурентов. Инструкции: {instructions}"
 
-            content, updated_history = await self._kie.completion_with_history(
+            # РАСПАКОВЫВАЕМ 3 ПЕРЕМЕННЫЕ (content, reasoning, updated_history)
+            content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
             )
 
             project.chat_history = updated_history
+            flag_modified(project, "chat_history")
 
             article = Article(
                 project_id=project.id,
                 title=topic,
-                content=content
+                content=content,
+                reasoning=reasoning  # Сохраняем мысли нейросети
             )
             await uow.articles.add(article)
 

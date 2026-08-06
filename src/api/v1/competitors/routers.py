@@ -28,7 +28,6 @@ async def analyze_competitors(
         status="Графы построены, контекст диалога сохранен."
     )
 
-
 @router.post(
     "/projects/{project_id}/generate-article",
     response_model=schemas.ArticleResponse,
@@ -47,8 +46,9 @@ async def generate_article(
         )
         return article
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
+        if "Проект не найден" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post(
     "/projects/{project_id}/chat",
@@ -66,4 +66,6 @@ async def chat_with_context(
         )
         return {"response": response_text}
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        if "Проект не найден" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))

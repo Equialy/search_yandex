@@ -20,13 +20,12 @@ class ContinueContextChatUseCase:
             if not project:
                 raise ValueError("Проект не найден")
 
-            # Отправляем накопительный контекст в KIE.AI
-            response_text, updated_history = await self._kie.completion_with_history(
+            # РАСПАКОВЫВАЕМ 3 ПЕРЕМЕННЫЕ: response_text, reasoning, updated_history
+            response_text, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=user_prompt
             )
 
-            # Обновляем историю сообщений и сохраняем
             project.chat_history = updated_history
             flag_modified(project, "chat_history")
 

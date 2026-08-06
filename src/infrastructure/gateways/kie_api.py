@@ -37,12 +37,12 @@ class KieApiGateway:
             })
         return formatted
 
-    async def generate_completion(
+    async def generate_completion_with_reasoning(
         self,
         messages: list[dict[str, Any]],
         reasoning_effort: str = "high"
-    ) -> str:
-        """Отправляет запрос на генерацию в KIE.AI GPT 5.2."""
+    ) -> tuple[str, str]:
+        """Возвращает (текст ответа, ход рассуждений нейросети)."""
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json"
@@ -64,7 +64,31 @@ class KieApiGateway:
             raise ValueError(f"Пустой ответ от KIE.AI API: {data}")
 
         message = choices[0].get("message", {})
-        return message.get("content", "")
+        content = message.get("content", "")
+        # Извлекаем рассуждения модели:
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+
+        return content, reasoning
+
+    async def completion_with_history(
+        self,
+        history: list[dict[str, Any]],
+        user_prompt: str
+    ) -> tuple[str, str, list[dict[str, Any]]]:
+        """Возвращает (текст ответа, рассуждения, обновленная история)."""
+        updated_history = list(history)
+        updated_history.append({"role": "user", "content": user_prompt})
+
+        content, reasoning = await self.generate_completion_with_reasoning(updated_history, reasoning_effort="high")
+
+        # В истории сохраняем и мысли, и ответ
+        updated_history.append({
+            "role": "assistant",
+            "content": content,
+            "reasoning": reasoning
+        })
+
+        return content, reasoning, updated_history
 
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
         """Анализирует граф и контент сайта для получения выжимки."""
@@ -79,16 +103,16 @@ class KieApiGateway:
         messages = [{"role": "user", "content": prompt}]
         return await self.generate_completion(messages, reasoning_effort="high")
 
-    async def completion_with_history(
-        self,
-        history: list[dict[str, Any]],
-        user_prompt: str
-    ) -> tuple[str, list[dict[str, Any]]]:
-        """Генерирует ответ с сохранением истории диалога (контекста)."""
-        updated_history = list(history)
-        updated_history.append({"role": "user", "content": user_prompt})
-
-        answer = await self.generate_completion(updated_history, reasoning_effort="high")
-
-        updated_history.append({"role": "assistant", "content": answer})
-        return answer, updated_history
+    # async def completion_with_history(
+    #     self,
+    #     history: list[dict[str, Any]],
+    #     user_prompt: str
+    # ) -> tuple[str, list[dict[str, Any]]]:
+    #     """Генерирует ответ с сохранением истории диалога (контекста)."""
+    #     updated_history = list(history)
+    #     updated_history.append({"role": "user", "content": user_prompt})
+    #
+    #     answer = await self.generate_completion(updated_history, reasoning_effort="high")
+    #
+    #     updated_history.append({"role": "assistant", "content": answer})
+    #     return answer, updated_history
