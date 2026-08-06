@@ -1,11 +1,13 @@
+
 import json
-from openai import AsyncOpenAI
+
 from src.api.v1.text_router.schema import DetectResponse, HumanizeResponse
+from src.infrastructure.gateways.kie_api import KieApiGateway
 
 
 class TextAiService:
-    def __init__(self, openai_client: AsyncOpenAI):
-        self.client = openai_client
+    def __init__(self, kie_gateway: KieApiGateway):
+        self.kie = kie_gateway
 
     async def detect_ai(self, text: str) -> DetectResponse:
         system_prompt = """
@@ -17,17 +19,20 @@ class TextAiService:
         - "reason": краткий анализ (2-3 предложения на русском языке), почему сделан такой вывод.
         """
 
-        response = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.1
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}
+        ]
 
-        data = json.loads(response.choices[0].message.content)
+        # Запрос к KIE.AI (GPT 5.2)
+        raw_content = await self.kie.generate_completion(messages, reasoning_effort="low")
+        raw_content = raw_content.strip()
+
+        # Безопасная очистка от возможной markdown-обертки ```json ... ```
+        if "```" in raw_content:
+            raw_content = raw_content.replace("```json", "").replace("```", "").strip()
+
+        data = json.loads(raw_content)
         return DetectResponse(**data)
 
     async def humanize_text(self, text: str) -> HumanizeResponse:
@@ -42,14 +47,11 @@ class TextAiService:
         5. Выводи ТОЛЬКО готовый текст.
         """
 
-        response = await self.client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.7
-        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}
+        ]
 
-        rewritten = response.choices[0].message.content.strip()
-        return HumanizeResponse(humanized_text=rewritten)
+        # Запрос к KIE.AI (GPT 5.2)
+        rewritten = await self.kie.generate_completion(messages, reasoning_effort="high")
+        return HumanizeResponse(humanized_text=rewritten.strip())

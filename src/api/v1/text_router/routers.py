@@ -1,15 +1,16 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+
+from fastapi import APIRouter, HTTPException, status
 from dishka.integrations.fastapi import FromDishka, DishkaRoute
 
-from src.api.v1.text_router.schema import DetectResponse, HumanizeResponse, TextRequest
+from src.api.v1.text_router.schema import DetectResponse, TextRequest, HumanizeResponse
 from src.api.v1.text_router.service import TextAiService
-from src.config.settings import settings
 
 router = APIRouter(
-    prefix=settings.api.v1.api_v1 + "/text",
-    tags=["Text"],
+    prefix="/v1/text",
+    tags=["Text Humanizer & AI Detector"],
     route_class=DishkaRoute,
 )
+
 
 @router.post("/detect", response_model=DetectResponse)
 async def detect_ai(
