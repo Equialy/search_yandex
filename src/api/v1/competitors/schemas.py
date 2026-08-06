@@ -1,14 +1,17 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, AliasGenerator
 from pydantic.alias_generators import to_camel
 
 
 class BaseDTO(BaseModel):
     model_config = ConfigDict(
-        alias_generator=to_camel,
+        from_attributes=True,
         populate_by_name=True,
-        from_attributes=True
+        alias_generator=AliasGenerator(
+            validation_alias=to_camel,
+            serialization_alias=to_camel,
+        ),
     )
 
 
@@ -28,14 +31,14 @@ class ChatContextRequest(BaseDTO):
 
 class ArticleResponse(BaseDTO):
     id: uuid.UUID
-    projectId: uuid.UUID
+    project_id: uuid.UUID
     title: str
     content: str
-    createdAt: datetime
+    created_at: datetime
 
 
 class ProjectAnalysisResponse(BaseDTO):
-    projectId: uuid.UUID
+    project_id: uuid.UUID
     keyword: str
-    foundUrls: list[str]
+    found_urls: list[str]
     status: str

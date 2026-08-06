@@ -28,6 +28,7 @@ class ApiPrefix(BaseModel):
 class KIEConfig(BaseModel):
     API_KEY: str
     callback_url: str
+    KIE_BASE_URL: str
     jobs_endpoint: str =  Field(
         default="/api/v1/jobs/createTask",
     )
@@ -78,6 +79,11 @@ class CloudflareR2Config(BaseModel):
 
 
 
+class OpenAI(BaseModel):
+    API_KEY: str
+    MODEL: str
+
+
 class Settings(BaseSettings):
     """
     Настройки модели.
@@ -96,11 +102,10 @@ class Settings(BaseSettings):
     jwt: JwtSettings
     kie: KIEConfig
     r2: CloudflareR2Config
+    YANDEX_API_KEY: str
+    YANDEX_FOLDER_ID: str
+    OPENAI: OpenAI
     # sqla: SQLAlchemy
-    img_playprofi_cdn_base: str = Field(
-        default="https://media.playprofi.com",
-        description="База URL для выдачи загрузок (изображения, видео, эффекты и т.д.); ключ в пути совпадает с R2.",
-    )
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

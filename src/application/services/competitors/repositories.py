@@ -15,7 +15,7 @@ class ProjectRepository(BaseRepository[Project]):
             select(Project)
             .where(Project.id == project_id)
         )
-        result = await self._session.execute(stmt)
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
 

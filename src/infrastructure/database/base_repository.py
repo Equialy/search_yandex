@@ -40,12 +40,19 @@ class BaseRepository(Generic[T]):
         result = await self.session.execute(query)
         return result.scalars().all()
 
-    async def add(self, data: dict) -> T:
-        field_keys = self._model_field_keys(self.model)
-        payload = {k: v for k, v in data.items() if k in field_keys}
-        obj = self.model(**payload)
+    async def add(self, data: Union[T, dict]) -> T:
+        if isinstance(data, self.model):
+            obj = data
+        elif isinstance(data, dict):
+            field_keys = self._model_field_keys(self.model)
+            payload = {k: v for k, v in data.items() if k in field_keys}
+            obj = self.model(**payload)
+        else:
+            raise ValueError(f"Expected dict or {self.model.__name__}, got {type(data)}")
+
         self.session.add(obj)
         await self.session.flush()
+        await self.session.refresh(obj)
         return obj
 
     async def update(self, obj_id: int, data: dict) -> Optional[T]:

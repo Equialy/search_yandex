@@ -27,13 +27,23 @@ class Project(Base):
         server_default="[]"
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(),
-                                                 onupdate=func.now())
+
 
     competitors: Mapped[list["CompetitorData"]] = relationship("CompetitorData", back_populates="project",
                                                                cascade="all, delete-orphan")
     articles: Mapped[list["Article"]] = relationship("Article", back_populates="project", cascade="all, delete-orphan")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False
+    )
 
 
 class CompetitorData(Base):

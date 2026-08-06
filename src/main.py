@@ -3,6 +3,8 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 
+from src.application.ioc.competitors import CompetitorsProvider
+from src.application.ioc.gateways import GatewaysProvider
 from src.application.ioc.infrastructure import InfrastructureProvider
 from src.bootstrap import apply_routes, lifespan
 from src.middlewares import apply_middleware
@@ -15,6 +17,8 @@ from src.config.settings import settings, config_logging
 
 container = make_async_container(
     InfrastructureProvider(),
+    GatewaysProvider(),
+    CompetitorsProvider(),
     FastapiProvider(),
 )
 

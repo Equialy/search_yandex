@@ -1,14 +1,14 @@
 from typing import Any
 from openai import AsyncOpenAI
+from src.config.settings import settings
 
 
 class LLMGateway:
-    def __init__(self, openai_client: AsyncOpenAI, model: str):
+    def __init__(self, openai_client: AsyncOpenAI):
         self._client = openai_client
-        self._model = model
+        self._model = settings.OPENAI.MODEL
 
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
-        """Делает выжимку структуры и мыслей одного сайта."""
         prompt = f"""
         Проанализируй граф структуры и контент сайта:
         Заголовок: {parsed_data.get('title')}
@@ -28,7 +28,6 @@ class LLMGateway:
             history: list[dict[str, Any]],
             user_prompt: str
     ) -> tuple[str, list[dict[str, Any]]]:
-        """Генерирует ответ с сохранением накопительного контекста."""
         updated_history = list(history)
         updated_history.append({"role": "user", "content": user_prompt})
 
