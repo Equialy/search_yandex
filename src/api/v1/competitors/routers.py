@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from src.api.v1.competitors import schemas
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
+from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
 
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
@@ -45,5 +46,24 @@ async def generate_article(
             instructions=payload.instructions
         )
         return article
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post(
+    "/projects/{project_id}/chat",
+    summary="3. Чат и доработка статьи в контексте проекта"
+)
+async def chat_with_context(
+    project_id: uuid.UUID,
+    payload: schemas.ChatContextRequest,
+    use_case: FromDishka[ContinueContextChatUseCase]
+):
+    try:
+        response_text = await use_case.execute(
+            project_id=project_id,
+            user_prompt=payload.prompt
+        )
+        return {"response": response_text}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

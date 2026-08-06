@@ -1,5 +1,6 @@
 from dishka import Provider, Scope, provide
 
+from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.llm_gateway import LLMGateway
@@ -32,5 +33,10 @@ class CompetitorsProvider(Provider):
 
     generate_article_use_case = provide(
         GenerateArticleUseCase,
+        scope=Scope.REQUEST,
+    )
+
+    chat_context_use_case = provide(
+        ContinueContextChatUseCase,
         scope=Scope.REQUEST,
     )

@@ -33,7 +33,7 @@ class InfrastructureProvider(Provider):
     @provide(scope=Scope.APP)
     async def get_http_client(self) -> AsyncGenerator[httpx.AsyncClient, None]:
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
-        async with httpx.AsyncClient(limits=limits, timeout=60.0) as client:
+        async with httpx.AsyncClient(limits=limits, timeout=15.0, trust_env=False) as client:
             yield client
 
     @provide(scope=Scope.APP)
