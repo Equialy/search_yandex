@@ -1,0 +1,14 @@
+[project]
+name = "search-yandex"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.19.0",
+    "dishka>=1.10.1",
+    "fastapi[all]>=0.141.1",
+    "openai>=2.53.0",
+    "psycopg[binary]>=3.3.4",
+    "sqlalchemy>=2.0.51",
+]
