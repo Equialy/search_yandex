@@ -5,6 +5,7 @@ from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.competitors import CompetitorData, Project
 from src.infrastructure.gateways.kie_api import KieApiGateway
+from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
 
@@ -15,12 +16,14 @@ class AnalyzeCompetitorsUseCase:
             uow: UnitOfWorkProtocol,
             yandex_gateway: YandexSearchGateway,
             parser_gateway: SiteParserGateway,
-            kie_gateway: KieApiGateway
+            # kie_gateway: KieApiGateway,
+            ai_gateway: OpenAiGateway
     ):
         self._uow = uow
         self._yandex = yandex_gateway
         self._parser = parser_gateway
-        self._kie = kie_gateway
+        # self._kie = kie_gateway
+        self._open_ai = ai_gateway
 
     async def execute(self, keyword: str, limit: int) -> tuple[uuid.UUID, list[str], list[CompetitorData]]:
         urls = await self._yandex.search(keyword, limit=limit)
@@ -48,7 +51,7 @@ class AnalyzeCompetitorsUseCase:
                 if not parsed_site:
                     continue
 
-                summary = await self._kie.summarize_site(parsed_site)
+                summary = await self._open_ai.summarize_site(parsed_site)
 
                 seo_meta = parsed_site.get("seo_meta", {})
                 content_struct = parsed_site.get("content_structure", {})

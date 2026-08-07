@@ -7,12 +7,13 @@ from src.application.prompts import SEO_GUIDELINE_TEXT  # <--- ИМПОРТ МЕ
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.competitors import Article
 from src.infrastructure.gateways.kie_api import KieApiGateway
+from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 
 
 class GenerateArticleUseCase:
-    def __init__(self, uow: UnitOfWorkProtocol, kie_gateway: KieApiGateway):
+    def __init__(self, uow: UnitOfWorkProtocol, ai_gateway: OpenAiGateway):
         self._uow = uow
-        self._kie = kie_gateway
+        self._openai = ai_gateway
 
     async def execute(self, project_id: uuid.UUID, topic: str, instructions: str) -> Article:
         async with self._uow as uow:
@@ -31,7 +32,7 @@ class GenerateArticleUseCase:
             {instructions}
             """
 
-            content, reasoning, updated_history = await self._kie.completion_with_history(
+            content, reasoning, updated_history = await self._openai.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
             )

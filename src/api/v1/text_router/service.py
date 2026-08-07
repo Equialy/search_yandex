@@ -3,11 +3,12 @@ import json
 
 from src.api.v1.text_router.schema import DetectResponse, HumanizeResponse
 from src.infrastructure.gateways.kie_api import KieApiGateway
+from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 
 
 class TextAiService:
-    def __init__(self, kie_gateway: KieApiGateway):
-        self.kie = kie_gateway
+    def __init__(self, ai_gateway: OpenAiGateway):
+        self.openai = ai_gateway
 
     async def detect_ai(self, text: str) -> DetectResponse:
         system_prompt = """
@@ -24,8 +25,7 @@ class TextAiService:
             {"role": "user", "content": text}
         ]
 
-        # Запрос к KIE.AI (GPT 5.2)
-        raw_content = await self.kie.generate_completion(messages, reasoning_effort="low")
+        raw_content = await self.openai.generate_completion(messages, reasoning_effort="low")
         raw_content = raw_content.strip()
 
         # Безопасная очистка от возможной markdown-обертки ```json ... ```
@@ -53,5 +53,5 @@ class TextAiService:
         ]
 
         # Запрос к KIE.AI (GPT 5.2)
-        rewritten = await self.kie.generate_completion(messages, reasoning_effort="high")
+        rewritten = await self.openai.generate_completion(messages, reasoning_effort="high")
         return HumanizeResponse(humanized_text=rewritten.strip())

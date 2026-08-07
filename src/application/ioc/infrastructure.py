@@ -40,6 +40,10 @@ class InfrastructureProvider(Provider):
     def get_openai_client(self) -> AsyncOpenAI:
         return AsyncOpenAI(api_key=settings.OPENAI.API_KEY)
 
+    @provide(scope=Scope.APP)
+    def get_openai_client(self) -> AsyncOpenAI:
+        return AsyncOpenAI(api_key=settings.OPENAI.API_KEY)
+
     uow = provide(
         UnitOfWork,
         scope=Scope.REQUEST,
