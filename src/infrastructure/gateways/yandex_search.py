@@ -1,4 +1,3 @@
-# src/infrastructure/gateways/yandex_search.py
 
 import base64
 import xml.etree.ElementTree as ET
@@ -15,8 +14,8 @@ class YandexSearchGateway:
 
     async def search(self, query: str, limit: int = 5) -> list[str]:
         fallback_urls = [
-                            "https://ru.wikipedia.org/wiki/Эспрессо",
-                            "https://ru.wikipedia.org/wiki/Кофемашина",
+                            "https://r52.ru/website-development/razrabotka-sayta-vizitki/",
+                            # "https://ru.wikipedia.org/wiki/Кофемашина",
                         ][:limit]
 
         if not self._api_key or self._api_key == "YOUR_YANDEX_API_KEY":

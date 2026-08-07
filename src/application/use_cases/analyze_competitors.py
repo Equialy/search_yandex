@@ -1,6 +1,9 @@
+# src/application/use_cases/analyze_competitors.py
+
 import uuid
 from sqlalchemy.orm.attributes import flag_modified
 
+from src.application.prompts import SEO_GUIDELINE_TEXT  # <--- ИМПОРТ МЕТОДИЧКИ
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.competitors import CompetitorData, Project
 from src.infrastructure.gateways.kie_api import KieApiGateway
@@ -28,7 +31,11 @@ class AnalyzeCompetitorsUseCase:
             initial_history = [
                 {
                     "role": "system",
-                    "content": f"Ты экспертный SEO-копирайтер. Проведен глубокий анализ конкурентов по ключевому слову '{keyword}'. Используй эти структуры и выжимки для написания статей."
+                    "content": f"""Ты — главный коммерческий SEO-копирайтер и эксперт по услугам.
+                Твоя задача — анализировать конкурентов по ключевому слову '{keyword}' и создавать готовые материалы, СТРОГО СОБЛЮДАЯ МЕТОДИЧКУ:
+                
+                {SEO_GUIDELINE_TEXT}
+                """
                 }
             ]
             project = Project(keyword=keyword, chat_history=initial_history)
@@ -39,31 +46,35 @@ class AnalyzeCompetitorsUseCase:
 
             for url in urls:
                 parsed_site = await self._parser.parse_site_to_graph(url)
-                if not parsed_site or not parsed_site.get("graph", {}).get("hierarchy"):
+                if not parsed_site:
                     continue
 
                 summary = await self._kie.summarize_site(parsed_site)
 
+                seo_meta = parsed_site.get("seo_meta", {})
+                content_struct = parsed_site.get("content_structure", {})
+                site_title = seo_meta.get("title") or url
+
                 competitor = CompetitorData(
                     project_id=project.id,
                     url=url,
-                    title=parsed_site.get("title"),
-                    graph_data=parsed_site.get("graph", {}),
+                    title=site_title,
+                    graph_data=content_struct.get("headings_hierarchy", []),
                     summary=summary
                 )
                 await uow.competitors.add(competitor)
-                summaries.append(f"Сайт: {url}\nЗаголовок: {parsed_site.get('title')}\nВыжимка тезисов: {summary}")
+                summaries.append(f"Сайт: {url}\nЗаголовок: {site_title}\nВыжимка тезисов: {summary}")
 
             if not summaries:
-                summaries.append(f"По ключу '{keyword}' были найдены сайты {urls}. Основной упор сделан на обзор общих типов кофемашин, брендов и критериев выбора.")
+                summaries.append(f"По ключу '{keyword}' были найдены сайты {urls}. Сделай упор на структуры коммерческих страниц услуг.")
 
-            context_prompt = "Вот выжимка анализа графов и смыслов топовых конкурентов:\n\n" + "\n\n---\n\n".join(summaries)
+            context_prompt = "Вот выжимка глубокого анализа конкурентов по методичке:\n\n" + "\n\n---\n\n".join(summaries)
 
             history = list(project.chat_history)
             history.append({"role": "user", "content": context_prompt})
-            history.append({"role": "assistant", "content": "Контекст конкурентов полностью усвоен. Я изучил структуры и выжимки. Готов писать статьи."})
+            history.append({"role": "assistant", "content": "Контекст конкурентов полностью усвоен. Я изучил коммерческие сигналы и выжимки. Готов писать статьи по методичке."})
 
             project.chat_history = history
-            flag_modified(project, "chat_history")  # Принудительно маркируем JSON поле как измененное
+            flag_modified(project, "chat_history")
 
         return project.id, urls

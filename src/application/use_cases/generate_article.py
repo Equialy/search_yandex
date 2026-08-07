@@ -1,7 +1,9 @@
+# src/application/use_cases/generate_article.py
 
 import uuid
 from sqlalchemy.orm.attributes import flag_modified
 
+from src.application.prompts import SEO_GUIDELINE_TEXT  # <--- ИМПОРТ МЕТОДИЧКИ
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.competitors import Article
 from src.infrastructure.gateways.kie_api import KieApiGateway
@@ -18,9 +20,17 @@ class GenerateArticleUseCase:
             if not project:
                 raise ValueError("Проект не найден")
 
-            prompt = f"Напиши SEO-статью на тему '{topic}'. Используй контекст конкурентов. Инструкции: {instructions}"
+            # Формируем запрос, внедряя полную методичку
+            prompt = f"""Напиши экспертную SEO-статью / страницу услуги на тему '{topic}'.
+            
+            ВЫПОЛНЯЙ ВСЕ ТРЕБОВАНИЯ СТРОГО ПО МЕТОДИЧКЕ НИЖЕ:
+            
+            {SEO_GUIDELINE_TEXT}
+            
+            ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
+            {instructions}
+            """
 
-            # РАСПАКОВЫВАЕМ 3 ПЕРЕМЕННЫЕ (content, reasoning, updated_history)
             content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
@@ -33,7 +43,7 @@ class GenerateArticleUseCase:
                 project_id=project.id,
                 title=topic,
                 content=content,
-                reasoning=reasoning  # Сохраняем мысли нейросети
+                reasoning=reasoning
             )
             await uow.articles.add(article)
 

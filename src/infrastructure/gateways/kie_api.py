@@ -103,14 +103,44 @@ class KieApiGateway:
         return content, reasoning, updated_history
 
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
-        """Анализирует граф и контент сайта для получения выжимки."""
-        prompt = f"""
-        Проанализируй граф структуры и контент сайта:
-        Заголовок: {parsed_data.get('title')}
-        Иерархия заголовков (Граф): {parsed_data.get('graph', {}).get('hierarchy')}
-        Текст: {parsed_data.get('content_sample')}
+        """Делает глубинную SEO и коммерческую выжимку страницы по методичке."""
+        seo = parsed_data.get('seo_meta', {})
+        comm = parsed_data.get('commercial_signals', {})
+        struct = parsed_data.get('content_structure', {})
+        trust = parsed_data.get('trust_and_links', {})
 
-        Сформулируй 3-5 главных тезисов и уникальных мыслей этого сайта.
+        prompt = f"""
+        Проведи глубокий коммерческий и SEO-анализ страницы конкурента {parsed_data.get('url')}:
+
+        1. SEO МЕТАДАННЫЕ:
+        - Title ({seo.get('title_length')} симв.): "{seo.get('title')}"
+        - Description ({seo.get('description_length')} симв.): "{seo.get('description')}"
+        - Кол-во H1: {seo.get('h1_count')} (Основной H1: "{seo.get('main_h1')}")
+
+        2. СТРУКТУРА И ИЕРАРХИЯ ЗАГОЛОВКОВ (H1-H4):
+        {struct.get('headings_hierarchy')}
+
+        3. КОММЕРЧЕСКИЕ И КОНВЕРСИОННЫЕ ЭЛЕМЕНТЫ:
+        - Найденные цены/диапазоны: {comm.get('prices')}
+        - Формы заявки: {comm.get('forms_count')} шт. | Кнопки CTA: {comm.get('cta_buttons')}
+        - Есть калькулятор: {comm.get('has_calculator')} | Квиз: {comm.get('has_quiz')}
+        - Гарантии/Условия: {comm.get('has_guarantees')} | Кейсы/Примеры: {comm.get('has_cases')} | Отзывы: {comm.get('has_reviews')} | Реквизиты: {comm.get('has_requisites')}
+
+        4. ВИЗУАЛ И ТАБЛИЦЫ:
+        - Таблицы ({struct.get('tables_count')} шт.): {struct.get('tables_sample')}
+        - Списки ({struct.get('lists_count')} шт.): {struct.get('lists_sample')}
+
+        5. ЭЛЕМЕНТЫ ДОВЕРИЯ И ПЕРЕЛИНКОВКА:
+        - Ссылки на документы/лицензии: {trust.get('trust_links')}
+        - Перелинковка на услуги/статьи: {trust.get('related_service_links')}
+
+        6. ПРИМЕР ТЕКСТА:
+        {parsed_data.get('content_sample')}
+
+        Сформируй выжимку по методичке:
+        1. СИЛЬНЫЕ СТОРОНЫ (структура блоков, ценные элементы, наглядность).
+        2. СЛАБЫЕ СТОРОНЫ (где недожали, чего не хватает, где ошибка в SEO/H1/Цене).
+        3. КЛЮЧЕВЫЕ ТЕЗИСЫ И СМЫСЛЫ (что обязательно нужно применить в нашей статье).
         """
         messages = [{"role": "user", "content": prompt}]
         return await self.generate_completion(messages, reasoning_effort="high")
