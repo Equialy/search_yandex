@@ -17,14 +17,20 @@ router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route
     summary="1. Запуск анализа конкурентов из Яндекса"
 )
 async def analyze_competitors(
-    payload: schemas.AnalyzeCompetitorsRequest,
-    use_case: FromDishka[AnalyzeCompetitorsUseCase]
+        payload: schemas.AnalyzeCompetitorsRequest,
+        use_case: FromDishka[AnalyzeCompetitorsUseCase]
 ):
-    project_id, urls = await use_case.execute(keyword=payload.keyword, limit=payload.limit)
+    project_id, urls, competitors = await use_case.execute(keyword=payload.keyword, limit=payload.limit)
+
+    competitor_dtos = [
+        schemas.CompetitorDetailDTO.model_validate(c) for c in competitors
+    ]
+
     return schemas.ProjectAnalysisResponse(
         project_id=project_id,
         keyword=payload.keyword,
         found_urls=urls,
+        competitors=competitor_dtos,
         status="Графы построены, контекст диалога сохранен."
     )
 

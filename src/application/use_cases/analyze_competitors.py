@@ -1,9 +1,7 @@
-# src/application/use_cases/analyze_competitors.py
-
 import uuid
 from sqlalchemy.orm.attributes import flag_modified
 
-from src.application.prompts import SEO_GUIDELINE_TEXT  # <--- ИМПОРТ МЕТОДИЧКИ
+from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.competitors import CompetitorData, Project
 from src.infrastructure.gateways.kie_api import KieApiGateway
@@ -13,18 +11,18 @@ from src.infrastructure.gateways.yandex_search import YandexSearchGateway
 
 class AnalyzeCompetitorsUseCase:
     def __init__(
-        self,
-        uow: UnitOfWorkProtocol,
-        yandex_gateway: YandexSearchGateway,
-        parser_gateway: SiteParserGateway,
-        kie_gateway: KieApiGateway
+            self,
+            uow: UnitOfWorkProtocol,
+            yandex_gateway: YandexSearchGateway,
+            parser_gateway: SiteParserGateway,
+            kie_gateway: KieApiGateway
     ):
         self._uow = uow
         self._yandex = yandex_gateway
         self._parser = parser_gateway
         self._kie = kie_gateway
 
-    async def execute(self, keyword: str, limit: int) -> tuple[uuid.UUID, list[str]]:
+    async def execute(self, keyword: str, limit: int) -> tuple[uuid.UUID, list[str], list[CompetitorData]]:
         urls = await self._yandex.search(keyword, limit=limit)
 
         async with self._uow as uow:
@@ -32,10 +30,10 @@ class AnalyzeCompetitorsUseCase:
                 {
                     "role": "system",
                     "content": f"""Ты — главный коммерческий SEO-копирайтер и эксперт по услугам.
-                Твоя задача — анализировать конкурентов по ключевому слову '{keyword}' и создавать готовые материалы, СТРОГО СОБЛЮДАЯ МЕТОДИЧКУ:
-                
-                {SEO_GUIDELINE_TEXT}
-                """
+                    Твоя задача — анализировать конкурентов по ключевому слову '{keyword}' и создавать готовые материалы, СТРОГО СОБЛЮДАЯ МЕТОДИЧКУ:
+                    
+                    {SEO_GUIDELINE_TEXT}
+                    """
                 }
             ]
             project = Project(keyword=keyword, chat_history=initial_history)
@@ -43,6 +41,7 @@ class AnalyzeCompetitorsUseCase:
             await uow.commit()
 
             summaries = []
+            created_competitors = []
 
             for url in urls:
                 parsed_site = await self._parser.parse_site_to_graph(url)
@@ -63,18 +62,23 @@ class AnalyzeCompetitorsUseCase:
                     summary=summary
                 )
                 await uow.competitors.add(competitor)
+                created_competitors.append(competitor)
+
                 summaries.append(f"Сайт: {url}\nЗаголовок: {site_title}\nВыжимка тезисов: {summary}")
 
             if not summaries:
-                summaries.append(f"По ключу '{keyword}' были найдены сайты {urls}. Сделай упор на структуры коммерческих страниц услуг.")
+                summaries.append(
+                    f"По ключу '{keyword}' были найдены сайты {urls}. Сделай упор на структуры коммерческих страниц услуг.")
 
-            context_prompt = "Вот выжимка глубокого анализа конкурентов по методичке:\n\n" + "\n\n---\n\n".join(summaries)
+            context_prompt = "Вот выжимка глубокого анализа конкурентов:\n\n" + "\n\n---\n\n".join(
+                summaries)
 
             history = list(project.chat_history)
             history.append({"role": "user", "content": context_prompt})
-            history.append({"role": "assistant", "content": "Контекст конкурентов полностью усвоен. Я изучил коммерческие сигналы и выжимки. Готов писать статьи по методичке."})
+            history.append({"role": "assistant",
+                            "content": "Контекст конкурентов полностью усвоен. Я изучил коммерческие сигналы и выжимки. Готов писать статьи."})
 
             project.chat_history = history
             flag_modified(project, "chat_history")
 
-        return project.id, urls
+        return project.id, urls, created_competitors
