@@ -3,157 +3,303 @@
 
 ## 1. Общее описание проекта
 
-[//]: # (**Название проекта:** Yandex SEO Competitor Analyzer & Article Generator  )
+**Назначение:** платформа для поиска сайтов-конкурентов в Яндексе, асинхронного парсинга их структуры (граф H1–H3 на NetworkX), LSA/коммерческого анализа через LLM, накопления контекста проекта в БД, генерации SEO-статей и работы с ними через веб-UI, REST API, SEO-агента и MCP (Cursor / Claude Desktop / браузер).
 
-[//]: # (**Назначение:** Микросервис для поиска сайтов-конкурентов в Яндексе, асинхронного парсинга их структуры &#40;построение графов H1-H3 на NetworkX&#41;, извлечения главных смыслов через LLM, сохранения накапливаемого контекста диалога в БД и генерации экспертных SEO-статей через **KIE.AI &#40;GPT 5.2&#41;**.)
+**Архитектурный стиль:** Clean Architecture + DDD + Repository Pattern + Unit of Work (UOW) + IoC/DI (Dishka).
 
-**Архитектурный стиль:** Clean Architecture (Чистая архитектура) + DDD (Domain-Driven Design) + Repository Pattern + Unit of Work (UOW) + IoC/DI (Dishka).
+**Репозитории:**
+* Backend: `search_yandex/` (Python, FastAPI)
+* Frontend: `search_yandex_frontend/` (React, отдельный проект)
 
 ---
 
-## 2. Технологический Стек
+## 2. Технологический стек
 
-### Backend:
-* **Язык и среда:** Python 3.14+ (Асинхронный `async/await` стек)
+### Backend
+* **Язык:** Python 3.14+ (`async/await`)
+* **Менеджер зависимостей:** `uv` + `pyproject.toml`
 * **Веб-фреймворк:** FastAPI (`DishkaRoute`, `FromDishka`)
-* **IoC/DI Контейнер:** Dishka (`make_async_container`, `Scope.APP`, `Scope.REQUEST`)
-* **База данных:** PostgreSQL 17 / SQLite (`aiosqlite`)
-* **ORM:** SQLAlchemy 2.0 (`AsyncSession`, `mapped_column`, `JSONB`, `UUIDv7`) + Alembic
-* **HTTP Клиент & Парсинг:** `httpx.AsyncClient` (с `trust_env=False`), `BeautifulSoup4`, `NetworkX` (графы контента)
-* **LLM Gateway:** KIE.AI API (модель `gpt-5-2`, метод `POST /gpt-5-2/v1/chat/completions`)
-* **Search Gateway:** Yandex Search API v2 (`POST https://searchapi.api.cloud.yandex.net/v2/web/search`)
-* **Валидация и DTO:** Pydantic v2 (`AliasGenerator`, `AliasChoices`, `to_camel`)
+* **IoC/DI:** Dishka (`make_async_container`, `Scope.APP`, `Scope.REQUEST`)
+* **БД:** PostgreSQL (`asyncpg`) + Alembic
+* **ORM:** SQLAlchemy 2.0 (`AsyncSession`, `JSONB`, `UUIDv7`)
+* **HTTP & парсинг:** `httpx`, `curl-cffi`, `BeautifulSoup4`, `NetworkX`
+* **LLM:** OpenAI API (`OpenAiGateway`, основной путь) + KIE.AI (`KieApiGateway`, legacy)
+* **MCP:** FastMCP 2.x (`Streamable HTTP`, mount на `/mcp`)
+* **DTO:** Pydantic v2 (`AliasGenerator`, camelCase ↔ snake_case)
 
-### Frontend:
-* **Среда и сборка:** Node.js, Vite
-* **Фреймворк:** React 19 + JavaScript
-* **Менеджер состояния:** Redux Toolkit + RTK Query (`fetchBaseQuery`)
-* **Стилизация:** Tailwind CSS v4
+### Frontend
+* **Сборка:** Vite 8
+* **UI:** React 19 + JavaScript
+* **Роутинг:** React Router v7
+* **Состояние:** Redux Toolkit + RTK Query
+* **MCP-клиент:** `@modelcontextprotocol/sdk` (`StreamableHTTPClientTransport`)
+* **Стили:** Tailwind CSS v4
+* **Markdown:** `react-markdown` + `remark-gfm`
 
 ---
 
-## 3. Дерево Папок Проекта
+## 3. Дерево папок проекта
 
 ```text
-competitor_analyzer/
-├── backend/
-│   ├── src/
-│   │   ├── api/
-│   │   │   └── v1/
-│   │   │       └── competitors/
-│   │   │           ├── schemas.py       # DTO Схемы Pydantic v2 (camelCase/snake_case)
-│   │   │           └── routers.py       # Эндпоинты FastAPI (DishkaRoute)
-│   │   ├── application/
-│   │   │   ├── ioc/                     # Модульные провайдеры Dishka
-│   │   │   │   ├── infrastructure.py    # Engine, Session, HTTP Client, UOW
-│   │   │   │   └── competitors.py       # Gateways и Use Cases
-│   │   │   ├── services/
-│   │   │   │   └── competitors/
-│   │   │   │       └── repositories.py  # Репозитории (Project, Competitor, Article)
-│   │   │   ├── use_cases/               # Бизнес-сценарии
-│   │   │   │   ├── analyze_competitors.py
-│   │   │   │   └── generate_article.py
-│   │   │   └── uow.py                   # Unit of Work (Интерфейс и Реализация)
-│   │   ├── infrastructure/
-│   │   │   ├── database/
-│   │   │   │   ├── models/
-│   │   │   │   │   └── competitors.py   # SQLAlchemy 2.0 Модели
-│   │   │   │   ├── base_repository.py   # Generic BaseRepository[T]
-│   │   │   │   └── engine.py            # Async Engine & SessionMaker
-│   │   │   └── gateways/
-│   │   │       ├── yandex_search.py     # Yandex Search API v2
-│   │   │       ├── site_parser.py       # Scraper + NetworkX Graph Builder
-│   │   │       └── kie_api.py           # KIE.AI GPT 5.2 Gateway
-│   │   ├── config/
-│   │   │   └── settings.py              # Pydantic BaseSettings (.env)
-│   │   └── main.py                      # Точка входа FastAPI + Dishka Setup
-│   ├── alembic/                         # Миграции базы данных
-│   ├── .env
-│   └── requirements.txt
-│
-└── frontend/
-    ├── src/
-    │   ├── components/                  # Пошаговые компоненты
-    │   │   ├── Step1Analyze.jsx         # Форма ввода ключа Яндекса
-    │   │   ├── Step2Generate.jsx        # Настройка ТЗ статьи
-    │   │   └── Step3ArticleView.jsx     # Просмотр статьи + Чат в контексте
-    │   ├── store/                       # Redux Toolkit
-    │   │   ├── competitorApi.js         # RTK Query API
-    │   │   ├── projectSlice.js          # Slices состояния
-    │   │   └── index.js                 # Redux Store Config
-    │   ├── App.jsx                      # Главный Layout
-    │   ├── index.css                    # Tailwind CSS v4
-    │   └── main.jsx                     # Provider Store Setup
-    ├── package.json
-    └── vite.config.js
+search_yandex/                          # Backend
+├── src/
+│   ├── api/v1/
+│   │   ├── competitors/
+│   │   │   ├── schemas.py              # DTO проектов, конкурентов, статей
+│   │   │   └── routers.py              # CRUD проектов, анализ, генерация, чат
+│   │   ├── agent/
+│   │   │   ├── schemas.py              # DTO чата SEO-агента
+│   │   │   └── routers.py              # POST /v1/agent/chat (SSE)
+│   │   └── text_router/
+│   │       ├── schema.py
+│   │       ├── service.py              # Детектор AI / очеловечивание
+│   │       └── routers.py
+│   ├── application/
+│   │   ├── ioc/
+│   │   │   ├── infrastructure.py       # Engine, Session, OpenAI, UOW
+│   │   │   ├── gateways.py             # Yandex, Parser, KIE, OpenAI gateways
+│   │   │   └── competitors.py          # Use Cases + TextAiService
+│   │   ├── mcp/
+│   │   │   ├── server.py               # FastMCP tools + http_app
+│   │   │   ├── auth.py                 # JWT / test_mcp_key (IS_LOCAL)
+│   │   │   ├── helpers.py              # Прокси tool → internal REST
+│   │   │   ├── proxy.py                # ASGITransport → FastAPI
+│   │   │   └── router.py               # GET /api-keys/mcp/connect
+│   │   ├── services/competitors/
+│   │   │   └── repositories.py       # Project, Competitor, Article repos
+│   │   ├── use_cases/
+│   │   │   ├── analyze_competitors.py  # Анализ + экспорт в .txt
+│   │   │   ├── generate_article.py
+│   │   │   ├── chat_context.py
+│   │   │   ├── list_projects.py
+│   │   │   ├── get_project.py
+│   │   │   └── agent_chat.py           # LLM function calling + SSE
+│   │   ├── prompts.py
+│   │   └── uow.py
+│   ├── infrastructure/
+│   │   ├── database/
+│   │   │   ├── models/competitors.py
+│   │   │   ├── base_repository.py
+│   │   │   ├── engine.py
+│   │   │   └── migrations/
+│   │   └── gateways/
+│   │       ├── yandex_search.py
+│   │       ├── site_parser.py
+│   │       ├── openai_gateway.py
+│   │       ├── kie_api.py
+│   │       └── llm_gateway.py
+│   ├── config/
+│   │   ├── settings.py
+│   │   └── database.py
+│   ├── bootstrap.py                    # lifespan, apply_routes, mount /mcp
+│   ├── main.py
+│   └── middlewares.py                  # CORS + expose mcp-session-id
+├── exports/analysis/                   # JSON в .txt после анализа (gitignore)
+├── alembic.ini
+├── pyproject.toml
+└── docker-compose.yml
+
+search_yandex_frontend/                 # Frontend (отдельный репозиторий/папка)
+├── src/
+│   ├── components/
+│   │   ├── Layout.jsx                  # Sidebar + Outlet
+│   │   ├── Step1Analyze.jsx
+│   │   ├── Step2Generate.jsx
+│   │   ├── Step3ArticleView.jsx
+│   │   ├── AgentChat.jsx               # SEO-агент (SSE через RTK)
+│   │   ├── McpAgentChat.jsx            # Ручной вызов MCP tools
+│   │   └── TextHumanizer.jsx
+│   ├── pages/
+│   │   ├── GeneratorPage.jsx           # Мастер 3 шага
+│   │   ├── ProjectsPage.jsx            # Список проектов
+│   │   └── ProjectDetailPage.jsx       # Конкуренты + статьи
+│   ├── store/
+│   │   ├── competitorApi.js            # RTK Query (REST + agentChat SSE)
+│   │   ├── projectSlice.js
+│   │   └── index.js
+│   ├── App.jsx                         # React Router
+│   └── main.jsx
+└── package.json
 ```
 
 ---
 
-## 4. Спецификация Базовых Компонентов (Backend)
-### 4.1. Настройки (`src/config/settings.py` & `src/config/database.py`)
-Используются вложенные Pydantic-модели с поддержкой двойного подчеркивания `__` в `.env`:
-* `settings.db`: `DatabaseConfig` (содержит `pg: PostgresConfig` и `sqla: SQLAlchemyConfig`). URL генерируется через `settings.db.async_url`.
-* `settings.kie`: `KIEConfig` (содержит `settings.kie.API_KEY` и `settings.kie.KIE_BASE_URL`).
-* `settings.OPENAI`: `OpenAI` (содержит `settings.OPENAI.API_KEY` и `settings.OPENAI.MODEL`).
-* `settings.YANDEX_API_KEY` и `settings.YANDEX_FOLDER_ID`: верхний уровень настроек.
+## 4. Backend: ключевые компоненты
 
-### Инициализация Engine БД:
-Выполняется вызовом `new_engine(settings.db)` из `src/infrastructure/database/engine.py`.
-### 4.2. База Данных и Модели (`src/infrastructure/database/models/competitors.py`)
-* Использование `UUIDv7` для первичных ключей.
-* `JSONB` поле `chat_history` в таблице `projects` хранит накапливаемый контекст диалога с нейросетью: `[{"role": "system", "content": "..."}, ...]`.
-* `created_at` всегда задается с `default=lambda: datetime.now(timezone.utc)` и `server_default=func.now()`.
+### 4.1. Настройки (`src/config/settings.py`)
 
-### 4.3. Базовый Репозиторий (`src/infrastructure/database/base_repository.py`)
-* Метод `add(data: Union[T, dict])` умеет принимать как готовые экземпляры моделей ORM `T`, так и словари `dict`.
-* Обязателен вызов `await self.session.refresh(obj)` после `flush()`, чтобы мгновенно подгружать серверные дефолты (`created_at`).
+Вложенные Pydantic-модели, env через `__`:
+* `settings.db` — PostgreSQL
+* `settings.OPENAI` — `API_KEY`, `MODEL` (основной LLM)
+* `settings.kie` — KIE.AI (legacy)
+* `settings.jwt` — секрет для MCP JWT
+* `settings.YANDEX_API_KEY`, `settings.YANDEX_FOLDER_ID`
+* `settings.IS_LOCAL` — dev-режим (`test_mcp_key` для MCP)
+* `settings.base_url`, `settings.cors_origins`
 
-### 4.4. Unit of Work (`src/application/uow.py`)
-* Содержит свойства `projects`, `competitors`, `articles`.
-* Управляет границами единой атомарной транзакции (`async with uow:`). Никаких `commit()` внутри сервисов/репозиториев!
+### 4.2. Модели БД (`competitor_data`, `projects`, `articles`)
 
-### 4.5. Шлюзы (Gateways)
-1. **`YandexSearchGateway` (`src/infrastructure/gateways/yandex_search.py`)**:
-   * Делает `POST` запрос к Yandex Search API v2: `https://searchapi.api.cloud.yandex.net/v2/web/search`.
-   * Передает заголовок `Authorization: Api-Key <KEY>`.
-   * Распаковывает Base64 из поля `rawData` в XML и извлекает ссылки сайтов (`<doc><url>`).
-   * Содержит фолбек-ссылки (Википедия) на случай сбоев сети.
+| Таблица | Назначение |
+|---------|------------|
+| `projects` | Сессия анализа, `keyword`, `chat_history` (JSONB) |
+| `competitor_data` | URL, `title`, `graph_data` (title/description/body_text), `summary` |
+| `articles` | `title`, `content`, `reasoning` |
 
-2. **`SiteParserGateway` (`src/infrastructure/gateways/site_parser.py`)**:
-   * Скачивает HTML через `httpx.AsyncClient` с реальными браузерными `User-Agent`.
-   * Находит заголовки `H1`, `H2`, `H3` и строит графовую иерархию связей с помощью **`networkx.DiGraph`**.
-   * Если заголовки H1-H3 отсутствуют (как у SPA/маркетплейсов WB, DNS), формирует синтетическую иерархию графа из `Title` и `Meta Description`.
+`graph_data` — SEO-метаданные страницы конкурента (title, description, body_text). На фронте отображаются в разделе «Проекты».
 
-3. **`KieApiGateway` (`src/infrastructure/gateways/kie_api.py`)**:
-   * Запросы к `POST https://api.kie.ai/gpt-5-2/v1/chat/completions`.
-   * Форматирует массив сообщений под требования KIE.AI: `content` передается массивом объектов `[{"type": "text", "text": "..."}]`.
-   * Управляет параметром `"reasoning_effort": "high"`.
+### 4.3. Unit of Work (`src/application/uow.py`)
 
----
+Свойства: `projects`, `competitors`, `articles`.  
+Транзакции только через `async with uow:` — без `commit()` в репозиториях.
 
-## 5. Внедрение Зависимостей (Dishka IoC)
+### 4.4. Use Cases
 
-Провайдеры разделены на 2 уровня:
+| Use Case | Описание |
+|----------|----------|
+| `AnalyzeCompetitorsUseCase` | Yandex → parse → LSA summary → БД + экспорт `exports/analysis/*.txt` |
+| `GenerateArticleUseCase` | Статья по контексту проекта (OpenAI) |
+| `ContinueContextChatUseCase` | Доработка статьи в чате |
+| `ListProjectsUseCase` | Список проектов с counts |
+| `GetProjectUseCase` | Проект + competitors + articles |
+| `AgentChatUseCase` | OpenAI function calling, инструменты как у MCP + `get_project_results` |
 
-1. **`InfrastructureProvider` (`src/application/ioc/infrastructure.py`)**:
-   * `AsyncEngine`, `AsyncSession` (с `AsyncGenerator[T, None]`).
-   * `httpx.AsyncClient` с `trust_env=False` (чтобы игнорировать некорректные прокси Windows).
-   * `uow = provide(UnitOfWork, scope=Scope.REQUEST, provides=UnitOfWorkProtocol)`.
+### 4.5. Экспорт анализа в файл
 
-2. **`CompetitorsProvider` (`src/application/ioc/competitors.py`)**:
-   * Декларативное объявление через атрибуты класса:
-     * `yandex_gateway = provide(YandexSearchGateway, scope=Scope.APP)`
-     * `parser_gateway = provide(SiteParserGateway, scope=Scope.APP)`
-     * `kie_gateway = provide(KieApiGateway, scope=Scope.APP)`
-     * `analyze_competitors_use_case = provide(AnalyzeCompetitorsUseCase, scope=Scope.REQUEST)`
-     * `generate_article_use_case = provide(GenerateArticleUseCase, scope=Scope.REQUEST)`
+После каждого успешного анализа `AnalyzeCompetitorsUseCase` вызывает `save_analysis_to_txt()`:
+* Путь: `exports/analysis/analysis_{YYYY-MM-DD_HH-MM-SS}_{project_id}.txt`
+* Формат: JSON (projectId, keyword, competitors с seoMeta/summary)
+
+### 4.6. Gateways
+
+1. **`YandexSearchGateway`** — Yandex Search API v2, возвращает `{url, title, description}`.
+2. **`SiteParserGateway`** — HTML → NetworkX граф H1–H3, fallback title/description из Яндекса, фильтр маркетплейсов.
+3. **`OpenAiGateway`** — основной LLM (`chat.completions`, summarize, history).
+4. **`KieApiGateway`** — legacy KIE GPT 5.2.
 
 ---
 
-## 6. Правила Pydantic Схем (`src/api/v1/competitors/schemas.py`)
+## 5. REST API
 
-Для корректной работы с SQLAlchemy ORM и отдачи `camelCase` на фронтенд используется `AliasGenerator`:
+Базовый URL: `http://localhost:8000/v1`  
+Авторизация REST: **нет** (JWT только для MCP).
+
+### Competitors (`/v1/competitors`)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/analyze` | Анализ конкурентов (keyword/url, limit, projectId?) |
+| GET | `/projects` | Список проектов |
+| GET | `/projects/{id}` | Детали: competitors + articles |
+| POST | `/projects/{id}/generate-article` | Генерация статьи |
+| POST | `/projects/{id}/chat` | Чат в контексте проекта |
+
+### Agent (`/v1/agent`)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/chat` | SEO-агент, **SSE** (`event: status/delta/message/error/done`) |
+
+### Text (`/v1/text`)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/detect` | Детектор AI-текста |
+| POST | `/humanize` | Очеловечивание текста |
+
+### MCP Connect
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api-keys/mcp/connect` | Инструкция подключения MCP-клиента |
+
+---
+
+## 6. MCP (Model Context Protocol)
+
+### Сервер
+* **Mount:** `app.mount("/mcp", mcp_http_app)` в `bootstrap.py`
+* **Транспорт:** Streamable HTTP (не legacy SSE)
+* **Auth:** `Authorization: Bearer <JWT>` или `test_mcp_key` при `IS_LOCAL=true`
+* **CORS:** `expose_headers: mcp-session-id, mcp-protocol-version`
+
+### Tools
+* `analyze_competitors`
+* `generate_seo_article`
+* `continue_chat_refinement`
+
+Tools проксируют вызовы во внутренние REST-роуты через `ASGITransport` (`proxy.py`).
+
+### Клиенты
+* **Cursor / Claude:** конфиг из `/api-keys/mcp/connect`
+* **Браузер (McpAgentChat):** `@modelcontextprotocol/sdk` + `StreamableHTTPClientTransport`
+
+---
+
+## 7. SEO Agent (веб-чат)
+
+`AgentChatUseCase` — OpenAI с function calling:
+* `get_project_results` — чтение сохранённых данных (без перегенерации)
+* `analyze_competitors`, `generate_seo_article`, `continue_chat_refinement`
+
+Поток: `POST /v1/agent/chat` → `StreamingResponse` (SSE) → фронт через RTK Query `agentChat` mutation (`queryFn` + `fetch` для stream body).
+
+---
+
+## 8. Dishka IoC
+
+```text
+make_async_container(
+    InfrastructureProvider(),   # Engine, Session, httpx, OpenAI, UOW
+    GatewaysProvider(),         # Yandex, Parser, KIE, OpenAI gateways
+    CompetitorsProvider(),      # Use cases, TextAiService
+    FastapiProvider(),
+)
+```
+
+Роутеры используют `route_class=DishkaRoute` и `FromDishka[UseCase]`.
+
+---
+
+## 9. Frontend
+
+### Роутинг (`App.jsx`)
+
+| Путь | Страница |
+|------|----------|
+| `/` | GeneratorPage (мастер 3 шага) |
+| `/projects` | Список проектов |
+| `/projects/:projectId` | Конкуренты (title/description из graphData) + статьи |
+| `/agent` | SEO Agent Chat |
+| `/humanizer` | Детектор / очеловечивание |
+| `/mcp` | Панель ручного вызова MCP tools |
+
+### RTK Query (`competitorApi.js`)
+
+| Hook | Endpoint |
+|------|----------|
+| `useAnalyzeCompetitorsMutation` | POST `/competitors/analyze` |
+| `useGetProjectsQuery` | GET `/competitors/projects` |
+| `useGetProjectQuery` | GET `/competitors/projects/{id}` |
+| `useGenerateArticleMutation` | POST `.../generate-article` |
+| `useSendContextChatMutation` | POST `.../chat` |
+| `useAgentChatMutation` | POST `/agent/chat` (SSE, `onEvent` callback) |
+| `useDetectAiTextMutation` | POST `/text/detect` |
+| `useHumanizeTextMutation` | POST `/text/humanize` |
+
+Base URL: `http://localhost:8000/v1` (hardcoded).
+
+### UI Flow
+
+1. **Мастер (Generator):** Step1 анализ → Step2 генерация → Step3 статья + контекстный чат.
+2. **Проекты:** просмотр всех сохранённых анализов и статей (источник истины — БД).
+3. **SEO Agent:** естественный язык → LLM выбирает инструменты → ответ в чате.
+4. **MCP Tools:** ручной выбор tool и аргументов (для отладки).
+
+---
+
+## 10. Pydantic DTO
+
+`BaseDTO` с `AliasGenerator` — Python `snake_case`, JSON `camelCase`:
 
 ```python
 class BaseDTO(BaseModel):
@@ -166,40 +312,55 @@ class BaseDTO(BaseModel):
         ),
     )
 ```
-* **Все поля моделей в Python объявляются строго в `snake_case`** (`project_id`, `created_at`, `found_urls`).
-* Pydantic автоматически читает их из ORM и переводит в `camelCase` (`projectId`, `createdAt`, `foundUrls`) при сериализации в JSON.
 
 ---
 
-## 7. Спецификация Frontend (React + Redux Toolkit)
+## 11. Запуск
 
-### Redux RTK Query (`src/store/competitorApi.js`):
-* `analyzeCompetitors` $\rightarrow$ `POST /v1/competitors/analyze` (`{ keyword, limit }`).
-* `generateArticle` $\rightarrow$ `POST /v1/competitors/projects/{projectId}/generate-article` (`{ topic, instructions }`).
-* `sendContextChat` $\rightarrow$ `POST /v1/competitors/projects/{projectId}/chat` (`{ prompt }`).
-
-### Пошаговый Пользовательский Сценарий (UI Flow):
-1. **Шаг 1 (Step1Analyze):** Ввод ключевого слова $\rightarrow$ Показывает loader парсинга Яндекса $\rightarrow$ Сохраняет `projectId` и найденные ссылки в Redux $\rightarrow$ Переключает на Шаг 2.
-2. **Шаг 2 (Step2Generate):** Показывает список проанализированных сайтов $\rightarrow$ Позволяет задать тему и ТЗ $\rightarrow$ Отправляет запрос к KIE.AI GPT 5.2 $\rightarrow$ Сохраняет статью в Redux $\rightarrow$ Переключает на Шаг 3.
-3. **Шаг 3 (Step3ArticleView):** Выводит готовую статью в формате документа $\rightarrow$ Внизу располагает чат-формат для продолжения доработки этой статьи в сохраненном контексте сессии.
-
----
-
-## 8. Инструкция по Запуску и Развертыванию
-
-### Бэкенд:
+### Backend
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # или .venv\Scripts\activate на Windows
-pip install -r requirements.txt
+cd search_yandex
+uv sync
 alembic upgrade head
-uvicorn src.main:app --reload --port 8000
+uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Фронтенд:
+Swagger: `http://localhost:8000/docs`
+
+### Frontend
 ```bash
-cd frontend
-pnpm install  # или npm install
-pnpm dev      # Запуск на http://localhost:5173
+cd search_yandex_frontend
+npm install
+npm run dev    # http://localhost:5173
+```
+
+### Docker (опционально)
+```bash
+docker-compose up -d   # PostgreSQL, RabbitMQ и др.
+```
+
+---
+
+## 12. Диаграмма потоков
+
+```text
+┌─────────────┐     REST/SSE      ┌──────────────────┐
+│  React UI   │ ────────────────► │  FastAPI :8000   │
+│  (RTK Query)│                   │  /v1/competitors │
+└─────────────┘                   │  /v1/agent       │
+       │                          │  /v1/text        │
+       │ MCP (browser)            └────────┬─────────┘
+       └──────────────────────────► /mcp ◄─┘
+                                         │
+                    ┌────────────────────┼────────────────────┐
+                    ▼                    ▼                    ▼
+              Use Cases            OpenAI API           PostgreSQL
+                    │                                        │
+                    └──────────► exports/analysis/*.txt ◄───┘
+```
+
+```text
+Cursor / Claude ──► /mcp/ (Streamable HTTP + Bearer)
+                         │
+                         └──► MCP tools ──► internal REST (ASGI proxy)
 ```
