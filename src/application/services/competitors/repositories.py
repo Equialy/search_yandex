@@ -18,10 +18,21 @@ class ProjectRepository(BaseRepository[Project]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_all_ordered_by_updated(self, skip: int = 0, limit: int = 50) -> list[Project]:
+        stmt = select(Project).order_by(Project.updated_at.desc()).offset(skip).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
 class CompetitorRepository(BaseRepository[CompetitorData]):
     def __init__(self, session: AsyncSession):
         super().__init__(CompetitorData, session)
+
+    async def get_by_project_id(self, project_id: uuid.UUID) -> list[CompetitorData]:
+        stmt = select(CompetitorData).where(CompetitorData.project_id == project_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
 
 class ArticleRepository(BaseRepository[Article]):

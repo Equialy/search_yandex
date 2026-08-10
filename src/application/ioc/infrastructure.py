@@ -41,8 +41,25 @@ class InfrastructureProvider(Provider):
         return AsyncOpenAI(api_key=settings.OPENAI.API_KEY)
 
     @provide(scope=Scope.APP)
-    def get_openai_client(self) -> AsyncOpenAI:
-        return AsyncOpenAI(api_key=settings.OPENAI.API_KEY)
+    async def get_openai_client(self) -> AsyncGenerator[AsyncOpenAI, None]:
+        proxy_url = settings.proxy.HTTP_PROXY if settings.proxy and settings.proxy.HTTP_PROXY else None
+
+        openai_http_client = httpx.AsyncClient(
+            proxy=proxy_url,
+            timeout=120.0,
+            trust_env=False,
+        )
+
+        openai_client = AsyncOpenAI(
+            api_key=settings.OPENAI.API_KEY,
+            http_client=openai_http_client,
+        )
+
+        yield openai_client
+
+        await openai_http_client.aclose()
+
+
 
     uow = provide(
         UnitOfWork,

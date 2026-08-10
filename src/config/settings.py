@@ -77,7 +77,8 @@ class CloudflareR2Config(BaseModel):
     def endpoint_url(self) -> str:
         return f"https://{self.account_id}.r2.cloudflarestorage.com"
 
-
+class Proxy(BaseModel):
+    HTTP_PROXY: str
 
 class OpenAI(BaseModel):
     API_KEY: str
@@ -105,6 +106,7 @@ class Settings(BaseSettings):
     YANDEX_API_KEY: str
     YANDEX_FOLDER_ID: str
     OPENAI: OpenAI
+    proxy: Proxy
     # sqla: SQLAlchemy
 
     model_config = SettingsConfigDict(

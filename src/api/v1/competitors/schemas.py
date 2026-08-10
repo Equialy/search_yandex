@@ -1,3 +1,4 @@
+# src/api/v1/competitors/schemas.py
 
 import uuid
 from datetime import datetime
@@ -18,13 +19,16 @@ class BaseDTO(BaseModel):
 
 
 class AnalyzeCompetitorsRequest(BaseDTO):
-    keyword: str = Field(..., example="купить кофемашину для дома")
+    keyword: str | None = Field(default=None, example="купить кофемашину для дома")
+    url: str | None = Field(default=None, example="https://mysite.ru/my-landing")
     limit: int = Field(default=3, ge=1, le=10)
+    project_id: uuid.UUID | None = Field(default=None, description="Если указан, добавляем анализ в существующий проект")
 
 
 class GenerateArticleRequest(BaseDTO):
     topic: str = Field(..., example="Топ 10 кофемашин 2026 года")
     instructions: str = Field(default="", example="Добавь таблицу сравнения цен")
+    target_site: str | None = Field(default="", example="https://my-site.ru")
 
 
 class ChatContextRequest(BaseDTO):
@@ -54,3 +58,9 @@ class ProjectAnalysisResponse(BaseDTO):
     found_urls: list[str]
     competitors: list[CompetitorDetailDTO] = []
     status: str
+
+class ProjectListItemDTO(BaseDTO):
+    id: uuid.UUID
+    keyword: str
+    created_at: datetime
+    updated_at: datetime

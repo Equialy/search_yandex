@@ -6,33 +6,45 @@ from src.api.v1.competitors import schemas
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
+from src.application.use_cases.list_projects import ListProjectsUseCase
 
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
+
+
+
 
 
 @router.post(
     "/analyze",
     response_model=schemas.ProjectAnalysisResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="1. Запуск анализа конкурентов из Яндекса"
+    summary="1. Поиск/анализ конкурентов и пополнение контекста проекта"
 )
 async def analyze_competitors(
         payload: schemas.AnalyzeCompetitorsRequest,
         use_case: FromDishka[AnalyzeCompetitorsUseCase]
 ):
-    project_id, urls, competitors = await use_case.execute(keyword=payload.keyword, limit=payload.limit)
+    try:
+        project_id, urls, competitors = await use_case.execute(
+            keyword=payload.keyword,
+            url=payload.url,
+            limit=payload.limit,
+            project_id=payload.project_id
+        )
 
-    competitor_dtos = [
-        schemas.CompetitorDetailDTO.model_validate(c) for c in competitors
-    ]
+        competitor_dtos = [
+            schemas.CompetitorDetailDTO.model_validate(c) for c in competitors
+        ]
 
-    return schemas.ProjectAnalysisResponse(
-        project_id=project_id,
-        keyword=payload.keyword,
-        found_urls=urls,
-        competitors=competitor_dtos,
-        status="Графы построены, контекст диалога сохранен."
-    )
+        return schemas.ProjectAnalysisResponse(
+            project_id=project_id,
+            keyword=payload.keyword or payload.url or "Мульти-анализ",
+            found_urls=urls,
+            competitors=competitor_dtos,
+            status="Данные проанализированы и добавлены в общий контекст."
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post(
     "/projects/{project_id}/generate-article",
@@ -48,7 +60,8 @@ async def generate_article(
         article = await use_case.execute(
             project_id=project_id,
             topic=payload.topic,
-            instructions=payload.instructions
+            instructions=payload.instructions,
+            target_site=payload.target_site
         )
         return article
     except ValueError as e:
@@ -75,3 +88,16 @@ async def chat_with_context(
         if "Проект не найден" in str(e):
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get(
+    "/projects",
+    response_model=list[schemas.ProjectListItemDTO],
+    summary="Получить список всех проектов с датами создания и обновления"
+)
+async def list_projects(
+    use_case: FromDishka[ListProjectsUseCase]
+):
+    projects = await use_case.execute()
+    return [schemas.ProjectListItemDTO.model_validate(p) for p in projects]

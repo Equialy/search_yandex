@@ -2,6 +2,7 @@ from dishka import Provider, Scope, provide
 
 from src.api.v1.text_router.service import TextAiService
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
+from src.application.use_cases.list_projects import ListProjectsUseCase
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.llm_gateway import LLMGateway
@@ -44,5 +45,10 @@ class CompetitorsProvider(Provider):
 
     text_ai_service = provide(
         TextAiService,
+        scope=Scope.REQUEST,
+    )
+
+    list_projects_use_case = provide(
+        ListProjectsUseCase,
         scope=Scope.REQUEST,
     )
