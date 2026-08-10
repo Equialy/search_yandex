@@ -1,86 +1,102 @@
-# src/infrastructure/gateways/site_parser.py
-
+import re
 from typing import Any
 from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
+
+try:
+    from curl_cffi.requests import AsyncSession
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
 
 
 class SiteParserGateway:
     def __init__(self, http_client: httpx.AsyncClient):
         self._client = http_client
 
-    async def parse_site_to_graph(self, url: str) -> dict[str, Any]:
-        """Парсит страницу с автоматическим прохождением редиректов (307/301) и защитой от 403."""
+    async def parse_site_to_graph(
+        self,
+        url: str,
+        fallback_title: str = "",
+        fallback_desc: str = ""
+    ) -> dict[str, Any]:
+        """Извлекает УНИКАЛЬНЫЙ текст со страницы без дублирования родительских тегов."""
         parsed_url = urlparse(url)
         domain = parsed_url.netloc or url
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1"
-        }
+        html_text = ""
 
-        try:
-            response = await self._client.get(
-                url,
-                timeout=12.0,
-                headers=headers,
-                follow_redirects=True
+        if CURL_CFFI_AVAILABLE:
+            try:
+                async with AsyncSession(impersonate="chrome124") as session:
+                    res = await session.get(url, timeout=15, allow_redirects=True)
+                    if res.status_code == 200:
+                        html_text = res.text
+            except Exception as e:
+                print(f"[curl_cffi Warning for {url}]: {e}")
+
+        if not html_text and hasattr(self._client, "get"):
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8",
+                }
+                res = await self._client.get(url, timeout=12.0, headers=headers, follow_redirects=True)
+                if res.status_code == 200:
+                    html_text = res.text
+            except Exception as e:
+                print(f"[httpx Warning for {url}]: {e}")
+
+        if html_text:
+            soup = BeautifulSoup(html_text, "html.parser")
+
+            title = soup.title.get_text(" ", strip=True) if soup.title else ""
+            if not title:
+                og_title = soup.find("meta", attrs={"property": re.compile(r"og:title$", re.I)})
+                if og_title and og_title.get("content"):
+                    title = og_title.get("content").strip()
+
+            final_title = title or fallback_title or domain
+
+            meta_desc = ""
+            meta_tag = (
+                soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
+                or soup.find("meta", attrs={"property": re.compile(r"description$", re.I)})
             )
+            if meta_tag and meta_tag.get("content"):
+                meta_desc = meta_tag.get("content").strip()
 
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, "html.parser")
+            final_desc = meta_desc or fallback_desc or ""
 
-                title = soup.title.string.strip() if soup.title and soup.title.string else domain
+            body = soup.find("body") or soup
+            for tag in body(["script", "style", "nav", "footer", "header", "aside", "noscript", "svg", "iframe", "form"]):
+                tag.extract()
 
-                meta_desc = ""
-                meta_tag = (
-                    soup.find("meta", attrs={"name": "description"})
-                    or soup.find("meta", attrs={"property": "og:description"})
-                )
-                if meta_tag and meta_tag.get("content"):
-                    meta_desc = meta_tag.get("content").strip()
+            unique_lines = []
+            for string in body.stripped_strings:
+                clean_str = string.strip()
+                if len(clean_str) > 3 and (not unique_lines or unique_lines[-1] != clean_str):
+                    unique_lines.append(clean_str)
 
-                body = soup.find("body") or soup
-                for tag in body(["script", "style", "aside", "noscript", "svg", "iframe"]):
-                    tag.extract()
+            clean_body_text = "\n".join(unique_lines)
 
-                main_container = body.find("main") or body.find("article") or body
-
-                text_blocks = []
-                for tag in main_container.find_all(["p", "h1", "h2", "h3", "h4", "li", "span", "div"]):
-                    txt = tag.get_text(strip=True)
-                    if len(txt) > 20 and txt not in text_blocks:
-                        text_blocks.append(txt)
-
-                central_text = "\n".join(text_blocks[:25])[:2500]
-
-                if not central_text.strip():
-                    central_text = f"Страница категории {domain}. {title}. {meta_desc}".strip()
-
+            if len(clean_body_text.strip()) > 50:
+                print(f"[SiteParserGateway Success]: Извлечено {len(clean_body_text)} символов чистого уникального текста с {domain}!")
                 return {
                     "url": url,
-                    "title": title,
-                    "description": meta_desc,
-                    "body_text": central_text
+                    "title": final_title,
+                    "description": final_desc,
+                    "body_text": clean_body_text
                 }
 
-        except Exception as e:
-            print(f"[SiteParserGateway Exception for {url}]: {type(e).__name__} - {e}")
+        real_title = fallback_title or f"Сайт {domain}"
+        real_desc = fallback_desc or f"Страница {domain}"
 
         return {
             "url": url,
-            "title": f"Каталог товаров {domain}",
-            "description": f"Официальная страница категории интернет-магазина {domain}",
-            "body_text": f"Крупный маркетплейс и интернет-магазин {domain}. Страница категории каталога товаров по адресу {url}."
+            "title": real_title,
+            "description": real_desc,
+            "body_text": f"Заголовок: {real_title}\nОписание: {real_desc}"
         }
