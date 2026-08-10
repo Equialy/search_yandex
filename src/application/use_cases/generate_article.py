@@ -1,12 +1,38 @@
 # src/application/use_cases/generate_article.py
 
+import json
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
 from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
+from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import Article
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway  # или KieApiGateway
+
+EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
+EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def save_article_to_txt(article: Article) -> Path:
+    """Сохраняет сгенерированную статью и ход рассуждений в .txt файл на диске с датой."""
+    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    data = {
+        "id": str(article.id),
+        "projectId": str(article.project_id),
+        "title": article.title,
+        "content": article.content,
+        "reasoning": article.reasoning,
+        "createdAt": article.created_at.isoformat() if article.created_at else datetime.now(timezone.utc).isoformat(),
+    }
+
+    file_path = EXPORTS_ARTICLES_DIR / f"article_{now_str}.txt"
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return file_path
 
 
 class GenerateArticleUseCase:
@@ -81,5 +107,8 @@ class GenerateArticleUseCase:
                 reasoning=reasoning
             )
             await uow.articles.add(article)
+
+            saved_article_file = save_article_to_txt(article)
+            print(f"[Article Saved to File]: {saved_article_file}")
 
             return article

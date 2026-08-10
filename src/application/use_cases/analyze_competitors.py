@@ -1,14 +1,49 @@
-# src/application/use_cases/analyze_competitors.py
-
+import json
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
 from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
+from src.config.settings import BASE_DIR  # Базовая директория проекта
 from src.infrastructure.database.models.competitors import CompetitorData, Project
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway  # или KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
+
+EXPORTS_DIR = BASE_DIR / "exports" / "analysis"
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def save_analysis_to_txt(project_id: uuid.UUID, keyword: str, competitors: list[CompetitorData]) -> Path:
+    """Сохраняет результаты анализа в .txt файл на диске с указанием даты и времени."""
+    export_payload = {
+        "projectId": str(project_id),
+        "keyword": keyword,
+        "exportedAt": datetime.now(timezone.utc).isoformat(),
+        "competitorsCount": len(competitors),
+        "competitors": [
+            {
+                "id": str(c.id),
+                "url": c.url,
+                "title": c.title,
+                "seoMeta": c.graph_data,
+                "summary": c.summary,
+                "createdAt": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in competitors
+        ]
+    }
+
+    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    file_path = EXPORTS_DIR / f"analysis_{now_str}.txt"
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(export_payload, f, ensure_ascii=False, indent=2)
+
+    return file_path
 
 
 class AnalyzeCompetitorsUseCase:
@@ -32,7 +67,6 @@ class AnalyzeCompetitorsUseCase:
             project_id: uuid.UUID | None = None
     ) -> tuple[uuid.UUID, list[str], list[CompetitorData]]:
 
-        # Определяем список URL для анализа
         urls_to_analyze = []
         if url:
             urls_to_analyze = [url.strip()]
@@ -42,7 +76,6 @@ class AnalyzeCompetitorsUseCase:
             raise ValueError("Укажите ключевое слово (keyword) или ссылку (url)")
 
         async with self._uow as uow:
-            # 1. Если передали project_id — загружаем существующий проект, иначе создаем новый
             if project_id:
                 project = await uow.projects.get_with_relations(project_id)
                 if not project:
@@ -64,7 +97,6 @@ class AnalyzeCompetitorsUseCase:
 
             summaries = []
 
-            # 2. Анализируем новые сайты
             for site_url in urls_to_analyze:
                 parsed_site = await self._parser.parse_site_to_graph(site_url)
                 if not parsed_site:
@@ -107,5 +139,12 @@ class AnalyzeCompetitorsUseCase:
 
             all_project_competitors = await uow.competitors.get_by_project_id(project.id)
             all_urls = [c.url for c in all_project_competitors]
+
+            saved_file_path = save_analysis_to_txt(
+                project_id=project.id,
+                keyword=project.keyword,
+                competitors=all_project_competitors
+            )
+            print(f"[Analysis Saved to File]: {saved_file_path}")
 
         return project.id, all_urls, all_project_competitors
