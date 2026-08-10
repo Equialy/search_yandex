@@ -11,7 +11,7 @@ from src.middlewares import apply_middleware
 from dishka.integrations.fastapi import setup_dishka, FastapiProvider
 from dishka import make_async_container
 from src.config.settings import settings, config_logging
-
+from src.application.mcp.proxy import set_mcp_app
 
 
 
