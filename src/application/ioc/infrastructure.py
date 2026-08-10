@@ -1,5 +1,6 @@
 from typing import AsyncGenerator
 import httpx
+import pymorphy3
 from dishka import Provider, Scope, provide
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -59,7 +60,10 @@ class InfrastructureProvider(Provider):
 
         await openai_http_client.aclose()
 
-
+    @provide(scope=Scope.APP)
+    def get_morph_analyzer(self) -> pymorphy3.MorphAnalyzer:
+        """Словарь загружается 1 раз при старте приложения"""
+        return pymorphy3.MorphAnalyzer()
 
     uow = provide(
         UnitOfWork,

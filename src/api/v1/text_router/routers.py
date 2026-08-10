@@ -2,6 +2,7 @@
 from fastapi import APIRouter, HTTPException, status
 from dishka.integrations.fastapi import FromDishka, DishkaRoute
 
+from src.api.v1.text_router import schema
 from src.api.v1.text_router.schema import DetectResponse, TextRequest, HumanizeResponse
 from src.api.v1.text_router.service import TextAiService
 
@@ -36,3 +37,15 @@ async def humanize(
             detail="Текст не может быть пустым"
         )
     return await service.humanize_text(req.text)
+
+@router.post(
+    "/nausea",
+    response_model=schema.CalculateNauseaResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Расчет классической и академической тошнотности текста"
+)
+async def calculate_nausea(
+    payload: schema.CalculateNauseaRequest,
+    service: FromDishka[TextAiService]
+):
+    return service.calculate_nausea(payload)
