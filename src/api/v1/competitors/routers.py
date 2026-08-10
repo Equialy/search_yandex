@@ -6,12 +6,10 @@ from src.api.v1.competitors import schemas
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
+from src.application.use_cases.get_project import GetProjectUseCase
 from src.application.use_cases.list_projects import ListProjectsUseCase
 
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
-
-
-
 
 
 @router.post(
@@ -46,6 +44,7 @@ async def analyze_competitors(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post(
     "/projects/{project_id}/generate-article",
     response_model=schemas.ArticleResponse,
@@ -69,6 +68,7 @@ async def generate_article(
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post(
     "/projects/{project_id}/chat",
     summary="3. Чат и доработка статьи в контексте проекта"
@@ -90,7 +90,6 @@ async def chat_with_context(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 @router.get(
     "/projects",
     response_model=list[schemas.ProjectListItemDTO],
@@ -101,3 +100,34 @@ async def list_projects(
 ):
     projects = await use_case.execute()
     return [schemas.ProjectListItemDTO.model_validate(p) for p in projects]
+
+
+@router.get(
+    "/projects/{project_id}",
+    response_model=schemas.ProjectDetailDTO,
+    summary="Детали проекта: конкуренты и сгенерированные статьи",
+)
+async def get_project(
+    project_id: uuid.UUID,
+    use_case: FromDishka[GetProjectUseCase],
+):
+    try:
+        project = await use_case.execute(project_id)
+        return schemas.ProjectDetailDTO(
+            id=project.id,
+            keyword=project.keyword,
+            competitors=[
+                schemas.CompetitorDetailDTO.model_validate(c)
+                for c in (project.competitors or [])
+            ],
+            articles=[
+                schemas.ArticleResponse.model_validate(a)
+                for a in (project.articles or [])
+            ],
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+        )
+    except ValueError as e:
+        if "Проект не найден" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))

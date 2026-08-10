@@ -59,8 +59,20 @@ class ProjectAnalysisResponse(BaseDTO):
     competitors: list[CompetitorDetailDTO] = []
     status: str
 
+
 class ProjectListItemDTO(BaseDTO):
     id: uuid.UUID
     keyword: str
+    created_at: datetime
+    updated_at: datetime
+    competitors_count: int = 0
+    articles_count: int = 0
+
+
+class ProjectDetailDTO(BaseDTO):
+    id: uuid.UUID
+    keyword: str
+    competitors: list[CompetitorDetailDTO] = []
+    articles: list[ArticleResponse] = []
     created_at: datetime
     updated_at: datetime

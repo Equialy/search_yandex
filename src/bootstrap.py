@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
+from src.api.v1.agent.routers import router as agent_router
 from src.api.v1.competitors.routers import router as competitors_router
 from src.api.v1.text_router.routers import router as text_router
 from src.application.mcp.router import router as mcp_connect_router
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
 def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(competitors_router)
     app.include_router(text_router)
+    app.include_router(agent_router)
     app.include_router(mcp_connect_router)
 
     # Монтируем единственный экземпляр на /mcp
