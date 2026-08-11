@@ -1,3 +1,4 @@
+# src/infrastructure/gateways/yandex_search.py
 
 import base64
 import re
@@ -15,7 +16,24 @@ AGGREGATOR_DOMAINS = {
     "lemanapro.ru", "nizhniy-novgorod.lemanapro.ru",
     "dns-shop.ru", "www.dns-shop.ru",
     "kwork.ru", "www.kwork.ru",
-    "aliexpress.ru", "www.aliexpress.ru"
+    "aliexpress.ru", "www.aliexpress.ru",
+    "sbermegamarket.ru",
+
+    "uslugi.yandex.ru", "yandex.ru/uslugi",
+    "profi.ru", "www.profi.ru",
+    "youdo.com", "youdo.ru",
+    "fl.ru", "freelance.ru", "habr.com",
+
+    "2gis.ru", "www.2gis.ru", "2gis.com",
+    "zoon.ru", "www.zoon.ru",
+    "flamp.ru", "www.flamp.ru",
+    "yandex.ru",
+    "yell.ru", "www.yell.ru",
+    "spravker.ru", "orgpage.ru", "yp.ru",
+
+    "otzovik.com", "irecommend.ru",
+    "hh.ru", "superjob.ru", "rabota.ru",
+    "cian.ru", "domclick.ru", "realty.yandex.ru"
 }
 
 
@@ -32,21 +50,22 @@ class YandexSearchGateway:
 
     @staticmethod
     def _is_aggregator(url: str) -> bool:
-        """Проверяет, является ли сайт маркетплейсом или агрегатором."""
+        """Проверяет, является ли сайт маркетплейсом, агрегатором услуг или справочником."""
         try:
-            domain = urlparse(url).netloc.lower()
-            return any(agg in domain for agg in AGGREGATOR_DOMAINS)
+            url_lower = url.lower()
+            domain = urlparse(url_lower).netloc
+            return any(agg in domain or agg in url_lower for agg in AGGREGATOR_DOMAINS)
         except Exception:
             return False
 
     async def search(self, query: str, limit: int = 5) -> list[dict[str, str]]:
         fallback_results = [
-                               {
-                                   "url": "https://ru.wikipedia.org/wiki/Эспрессо",
-                                   "title": "Эспрессо — Википедия",
-                                   "description": "Эспрессо — напиток из кофе."
-                               }
-                           ][:limit]
+            {
+                "url": "https://ru.wikipedia.org/wiki/Эспрессо",
+                "title": "Эспрессо — Википедия",
+                "description": "Эспрессо — напиток из кофе."
+            }
+        ][:limit]
 
         if not self._api_key or self._api_key == "YOUR_YANDEX_API_KEY":
             return fallback_results
@@ -64,7 +83,7 @@ class YandexSearchGateway:
                 "queryText": query
             },
             "groupSpec": {
-                "groupsOnPage": limit + 7
+                "groupsOnPage": limit + 10
             }
         }
 
@@ -93,7 +112,7 @@ class YandexSearchGateway:
                         url_text = url_node.text if url_node is not None and url_node.text else ""
 
                         if not url_text or self._is_aggregator(url_text):
-                            print(f"[YandexSearchGateway Skipping Aggregator]: {url_text}")
+                            print(f"[YandexSearchGateway Skipping Aggregator/Directory]: {url_text}")
                             continue
 
                         title_text = ""
@@ -114,8 +133,7 @@ class YandexSearchGateway:
 
                 if results:
                     filtered_results = results[:limit]
-                    print(
-                        f"\n[YandexSearchGateway V2 Success]: По запросу '{query}' отобрано {len(filtered_results)} РЕАЛЬНЫХ КОМПАНИЙ (маркетплейсы отфильтрованы):")
+                    print(f"\n[YandexSearchGateway V2 Success]: По запросу '{query}' отобран список из {len(filtered_results)} РЕАЛЬНЫХ КОМПАНИЙ (агрегаторы, 2ГИС и Яндекс Услуги отфильтрованы):")
                     for idx, res in enumerate(filtered_results, 1):
                         print(f"  {idx}. {res['url']}")
                     print()
