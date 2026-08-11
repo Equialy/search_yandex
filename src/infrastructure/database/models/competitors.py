@@ -59,7 +59,6 @@ class CompetitorData(Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(String(500))
 
-    # Граф сайта (узлы H1-H3, рёбра связей)
     graph_data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     summary: Mapped[str | None] = mapped_column(Text)
 

@@ -37,7 +37,6 @@ class TextAiService:
         raw_content = await self.openai.generate_completion(messages, reasoning_effort="low")
         raw_content = raw_content.strip()
 
-        # Безопасная очистка от возможной markdown-обертки ```json ... ```
         if "```" in raw_content:
             raw_content = raw_content.replace("```json", "").replace("```", "").strip()
 

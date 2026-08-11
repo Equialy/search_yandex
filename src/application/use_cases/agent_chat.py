@@ -6,12 +6,15 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from openai import AsyncOpenAI
+from sqlalchemy.orm.attributes import flag_modified
 
+from src.application.uow import UnitOfWorkProtocol
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
 from src.application.use_cases.get_project import GetProjectUseCase
 from src.config.settings import settings
+from src.infrastructure.database.models.agent import AgentChat
 
 SYSTEM_PROMPT = """Ты — SEO Competitor Analyzer Agent на сайте.
 Помогаешь пользователю анализировать конкурентов в Яндексе, собирать LSA-контекст и писать коммерческие SEO-статьи.
@@ -146,18 +149,20 @@ AGENT_TOOLS: list[dict[str, Any]] = [
 
 
 class AgentChatUseCase:
-    """LLM-агент с function calling поверх существующих use case'ов."""
+    """LLM-агент с сохранением сессий в базу данных PostgreSQL."""
 
     MAX_TOOL_ROUNDS = 6
 
     def __init__(
-        self,
-        openai_client: AsyncOpenAI,
-        analyze_competitors: AnalyzeCompetitorsUseCase,
-        generate_article: GenerateArticleUseCase,
-        chat_context: ContinueContextChatUseCase,
-        get_project: GetProjectUseCase,
+            self,
+            uow: UnitOfWorkProtocol,
+            openai_client: AsyncOpenAI,
+            analyze_competitors: AnalyzeCompetitorsUseCase,
+            generate_article: GenerateArticleUseCase,
+            chat_context: ContinueContextChatUseCase,
+            get_project: GetProjectUseCase,
     ):
+        self._uow = uow
         self._client = openai_client
         self._analyze = analyze_competitors
         self._generate = generate_article
@@ -166,10 +171,30 @@ class AgentChatUseCase:
         self._model = settings.OPENAI.MODEL
 
     async def stream(
-        self,
-        messages: list[dict[str, str]],
+            self,
+            messages: list[dict[str, str]],
+            chat_id: uuid.UUID | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Стримит SSE-события: status | delta | message | error | done."""
+        """Стримит SSE-события и сохраняет диалог в БД."""
+
+        # 1. Загружаем или создаем сессию чата в БД
+        async with self._uow as uow:
+            if chat_id:
+                chat_obj = await uow.agent_chats.get_by_id(chat_id)
+                if not chat_obj:
+                    user_first_text = next((m["content"] for m in messages if m.get("role") == "user"), "Диалог")
+                    chat_obj = AgentChat(id=chat_id, title=user_first_text[:40])
+                    await uow.agent_chats.add(chat_obj)
+            else:
+                user_first_text = next((m["content"] for m in messages if m.get("role") == "user"), "Новый диалог")
+                chat_obj = AgentChat(title=user_first_text[:40])
+                await uow.agent_chats.add(chat_obj)
+                await uow.commit()
+                chat_id = chat_obj.id
+
+            # Отдаем клиенту событие с ID созданной/загруженной сессии
+            yield {"type": "session", "data": {"chat_id": str(chat_id)}}
+
         openai_messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
         ]
@@ -178,11 +203,6 @@ class AgentChatUseCase:
             content = (msg.get("content") or "").strip()
             if role in {"user", "assistant"} and content:
                 openai_messages.append({"role": role, "content": content})
-
-        if not any(m["role"] == "user" for m in openai_messages):
-            yield {"type": "error", "data": {"message": "Нужно хотя бы одно сообщение пользователя"}}
-            yield {"type": "done", "data": {}}
-            return
 
         try:
             for _ in range(self.MAX_TOOL_ROUNDS):
@@ -204,11 +224,16 @@ class AgentChatUseCase:
                     text = (choice.content or "").strip()
                     chunk_size = 24
                     for i in range(0, len(text), chunk_size):
-                        yield {"type": "delta", "data": {"content": text[i : i + chunk_size]}}
+                        yield {"type": "delta", "data": {"content": text[i: i + chunk_size]}}
+
                     yield {
                         "type": "message",
                         "data": {"role": "assistant", "content": text},
                     }
+
+                    # СОХРАНЯЕМ ИТОГОВЫЙ ДИАЛОГ В БД
+                    await self._save_history_to_db(chat_id, messages, text)
+
                     yield {"type": "done", "data": {}}
                     return
 
@@ -274,6 +299,15 @@ class AgentChatUseCase:
         except Exception as exc:
             yield {"type": "error", "data": {"message": str(exc)}}
             yield {"type": "done", "data": {}}
+
+    async def _save_history_to_db(self, chat_id: uuid.UUID, history: list[dict[str, str]], assistant_reply: str):
+        """Сохраняет чистую историю сообщений в PostgreSQL."""
+        async with self._uow as uow:
+            chat_obj = await uow.agent_chats.get_by_id(chat_id)
+            if chat_obj:
+                full_history = list(history) + [{"role": "assistant", "content": assistant_reply}]
+                chat_obj.messages = full_history
+                flag_modified(chat_obj, "messages")
 
     async def _run_tool(self, name: str, args: dict[str, Any]) -> str:
         try:

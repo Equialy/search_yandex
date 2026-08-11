@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.infrastructure.database.base_repository import BaseRepository
+from src.infrastructure.database.models.agent import AgentChat
 from src.infrastructure.database.models.competitors import Article, CompetitorData, Project
 
 
@@ -62,5 +63,16 @@ class ArticleRepository(BaseRepository[Article]):
             .where(Article.project_id == project_id)
             .order_by(Article.created_at.desc())
         )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
+
+class AgentChatRepository(BaseRepository[AgentChat]):
+    def __init__(self, session: AsyncSession):
+        super().__init__(AgentChat, session)
+
+    async def get_all_ordered_by_updated(self) -> list[AgentChat]:
+        stmt = select(AgentChat).order_by(AgentChat.updated_at.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
