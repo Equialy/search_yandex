@@ -3,7 +3,9 @@
 import uuid
 from sqlalchemy.orm.attributes import flag_modified
 
+from src.application.prompts import CHAT_HTML_REFINEMENT_HINT
 from src.application.uow import UnitOfWorkProtocol
+from src.application.article_format import normalize_article_html
 from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 
@@ -22,10 +24,16 @@ class ContinueContextChatUseCase:
                 raise ValueError("Проект не найден")
 
             # РАСПАКОВЫВАЕМ 3 ПЕРЕМЕННЫЕ: response_text, reasoning, updated_history
+            wrapped_prompt = f"{user_prompt.strip()}\n\n{CHAT_HTML_REFINEMENT_HINT}"
+
             response_text, reasoning, updated_history = await self._openai.completion_with_history(
                 history=list(project.chat_history),
-                user_prompt=user_prompt
+                user_prompt=wrapped_prompt
             )
+
+            stripped = response_text.strip()
+            if stripped.startswith("```") or stripped.startswith("<"):
+                response_text = normalize_article_html(response_text)
 
             project.chat_history = updated_history
             flag_modified(project, "chat_history")

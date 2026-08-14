@@ -81,7 +81,6 @@ class OpenAiGateway:
 
         return content, reasoning, updated_history
 
-        # src/infrastructure/gateways/openai_gateway.py
 
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
         """Анализирует метаданные, заголовки, таблицы, FAQ и сплошной текст body."""

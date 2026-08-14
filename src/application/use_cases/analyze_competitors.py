@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
-from src.application.prompts import SEO_GUIDELINE_TEXT
+from src.application.prompts import SEO_GUIDELINE_TEXT, ARTICLE_HTML_FORMAT_TEXT
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import CompetitorData, Project
@@ -87,9 +87,11 @@ class AnalyzeCompetitorsUseCase:
                     {
                         "role": "system",
                         "content": f"""Ты — главный коммерческий SEO-копирайтер и эксперт по анализу конкурентов.
-Твоя задача — накапливать выжимки сайтов конкурентов и сайта пользователя, а затем создавать материалы по методичке:
+Твоя задача — накапливать выжимки сайтов конкурентов и сайта пользователя, а затем создавать материалы по методичке.
 
 {SEO_GUIDELINE_TEXT}
+
+{ARTICLE_HTML_FORMAT_TEXT}
 """
                     }
                 ]

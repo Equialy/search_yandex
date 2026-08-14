@@ -31,6 +31,18 @@ class GenerateArticleRequest(BaseDTO):
     target_site: str | None = Field(default="", example="https://my-site.ru")
 
 
+class ParseSiteRequest(BaseDTO):
+    url: str = Field(..., example="https://my-site.ru")
+
+
+class TargetSiteParseDTO(BaseDTO):
+    url: str
+    title: str | None = None
+    description: str | None = None
+    raw_text: str | None = None
+    is_blocked: bool = False
+
+
 class ChatContextRequest(BaseDTO):
     prompt: str = Field(..., example="Напиши краткое содержание ранее сгенерированной статьи")
 
@@ -42,6 +54,8 @@ class ArticleResponse(BaseDTO):
     content: str
     reasoning: str | None = None
     created_at: datetime
+    target_site: str | None = None
+    target_site_parse: TargetSiteParseDTO | None = None
 
 
 class CompetitorDetailDTO(BaseDTO):

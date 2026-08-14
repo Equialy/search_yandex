@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from src.api.v1.competitors import schemas
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
-from src.application.use_cases.generate_article import GenerateArticleUseCase
+from src.application.use_cases.generate_article import GenerateArticleUseCase, build_target_site_parse
 from src.application.use_cases.get_project import GetProjectUseCase
 from src.application.use_cases.list_projects import ListProjectsUseCase
 from src.infrastructure.gateways.site_parser import SiteParserGateway
@@ -57,17 +57,44 @@ async def generate_article(
     use_case: FromDishka[GenerateArticleUseCase]
 ):
     try:
-        article = await use_case.execute(
+        result = await use_case.execute(
             project_id=project_id,
             topic=payload.topic,
             instructions=payload.instructions,
             target_site=payload.target_site
         )
-        return article
+        parse_dto = None
+        if result.target_site_parse:
+            parse_dto = schemas.TargetSiteParseDTO.model_validate(result.target_site_parse)
+
+        article = result.article
+        return schemas.ArticleResponse(
+            id=article.id,
+            project_id=article.project_id,
+            title=article.title,
+            content=article.content,
+            reasoning=article.reasoning,
+            created_at=article.created_at,
+            target_site=result.target_site,
+            target_site_parse=parse_dto,
+        )
     except ValueError as e:
         if "Проект не найден" in str(e):
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/parse-site",
+    response_model=schemas.TargetSiteParseDTO,
+    summary="Парсинг целевого сайта для предпросмотра raw_text",
+)
+async def parse_site(
+    payload: schemas.ParseSiteRequest,
+    parser: FromDishka[SiteParserGateway],
+):
+    parsed = await parser.parse_site_to_graph(payload.url)
+    return schemas.TargetSiteParseDTO.model_validate(build_target_site_parse(payload.url, parsed))
 
 
 @router.post(

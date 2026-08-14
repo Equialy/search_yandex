@@ -361,12 +361,13 @@ class AgentChatUseCase:
                 return "\n".join(lines)
 
             if name == "generate_seo_article":
-                article = await self._generate.execute(
+                result = await self._generate.execute(
                     project_id=uuid.UUID(args["project_id"]),
                     topic=args["topic"],
                     instructions=args.get("instructions") or "",
                     target_site=args.get("target_site") or "",
                 )
+                article = result.article
                 return (
                     f"article_id: {article.id}\n"
                     f"project_id: {article.project_id}\n"
