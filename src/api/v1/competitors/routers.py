@@ -5,6 +5,11 @@ from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from src.api.v1.competitors import schemas
+from src.application.services.competitors.project_history import (
+    build_article_preview,
+    format_chat_history_for_ui,
+    get_latest_article_html,
+)
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase, build_target_site_parse
@@ -160,7 +165,7 @@ async def list_projects(
 @router.get(
     "/projects/{project_id}",
     response_model=schemas.ProjectDetailDTO,
-    summary="Детали проекта: конкуренты и сгенерированные статьи",
+    summary="Детали проекта: конкуренты, статьи, история чата и генераций",
 )
 async def get_project(
     project_id: uuid.UUID,
@@ -168,6 +173,46 @@ async def get_project(
 ):
     try:
         project = await use_case.execute(project_id)
+        articles = sorted(
+            project.articles or [],
+            key=lambda article: article.created_at,
+            reverse=True,
+        )
+        article_responses = []
+        generation_history = []
+
+        for article in articles:
+            preview = build_article_preview(article.content)
+            article_responses.append(schemas.ArticleResponse(
+                id=article.id,
+                project_id=article.project_id,
+                title=article.title,
+                content=article.content,
+                reasoning=article.reasoning,
+                created_at=article.created_at,
+                content_preview=preview,
+            ))
+            generation_history.append(schemas.ArticleHistoryItemDTO(
+                id=article.id,
+                title=article.title,
+                content_preview=preview,
+                reasoning=article.reasoning,
+                created_at=article.created_at,
+                content=article.content,
+            ))
+
+        chat_history = [
+            schemas.ChatHistoryMessageDTO.model_validate(item)
+            for item in format_chat_history_for_ui(project.chat_history)
+        ]
+
+        fallback_article = articles[0] if articles else None
+        latest_article_content = get_latest_article_html(
+            project.chat_history,
+            fallback_article.content if fallback_article else None,
+        )
+        latest_article_title = fallback_article.title if fallback_article else project.keyword
+
         return schemas.ProjectDetailDTO(
             id=project.id,
             keyword=project.keyword,
@@ -175,10 +220,11 @@ async def get_project(
                 schemas.CompetitorDetailDTO.model_validate(c)
                 for c in (project.competitors or [])
             ],
-            articles=[
-                schemas.ArticleResponse.model_validate(a)
-                for a in (project.articles or [])
-            ],
+            articles=article_responses,
+            chat_history=chat_history,
+            generation_history=generation_history,
+            latest_article_content=latest_article_content,
+            latest_article_title=latest_article_title,
             created_at=project.created_at,
             updated_at=project.updated_at,
         )

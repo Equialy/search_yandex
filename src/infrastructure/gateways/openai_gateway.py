@@ -2,6 +2,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from src.application.prompts import VISION_DESIGN_EXTRACT_PROMPT, VISION_STYLE_APPLY_PROMPT
 from src.config.settings import settings
 
 
@@ -86,6 +87,7 @@ class OpenAiGateway:
         image_base64: str | None = None,
         image_mime_type: str = "image/png",
         temperature: float = 0.7,
+        history_user_content: str | None = None,
     ) -> tuple[str, str, list[dict[str, Any]]]:
         """Возвращает (текст ответа, рассуждения, обновленная история)."""
         updated_history = list(history)
@@ -109,6 +111,9 @@ class OpenAiGateway:
             temperature=temperature,
         )
 
+        if history_user_content is not None:
+            updated_history[-1] = {"role": "user", "content": history_user_content}
+
         updated_history.append({
             "role": "assistant",
             "content": content,
@@ -116,6 +121,68 @@ class OpenAiGateway:
         })
 
         return content, reasoning, updated_history
+
+    async def _vision_completion(
+        self,
+        text_prompt: str,
+        image_base64: str,
+        image_mime_type: str,
+        *,
+        temperature: float = 0.2,
+        json_mode: bool = False,
+    ) -> str:
+        messages = [{
+            "role": "user",
+            "content": [
+                _build_image_content_part(image_base64, image_mime_type),
+                {"type": "text", "text": text_prompt},
+            ],
+        }]
+        kwargs: dict[str, Any] = {
+            "model": self._vision_model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = await self._client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content or ""
+
+    async def style_article_from_screenshot(
+        self,
+        article_html: str,
+        user_prompt: str,
+        image_base64: str,
+        image_mime_type: str = "image/png",
+    ) -> tuple[str, str]:
+        """
+        Изолированная стилизация: без истории чата.
+        Шаг 1 — design tokens со скриншота, шаг 2 — применение к markup.
+        """
+        print("[OpenAI]: стилизация — шаг 1/2: извлечение design tokens...")
+        design_tokens = await self._vision_completion(
+            VISION_DESIGN_EXTRACT_PROMPT,
+            image_base64,
+            image_mime_type,
+            temperature=0.15,
+            json_mode=True,
+        )
+
+        apply_prompt = VISION_STYLE_APPLY_PROMPT.format(
+            design_tokens=design_tokens,
+            user_prompt=user_prompt.strip() or "Стилизуй статью под скриншот сайта",
+            article_markup=article_html,
+        )
+
+        print("[OpenAI]: стилизация — шаг 2/2: применение CSS к статье...")
+        messages = [{"role": "user", "content": apply_prompt}]
+        content, reasoning = await self.generate_completion_with_reasoning(
+            messages,
+            model=self._model,
+            temperature=0.25,
+        )
+        return content, reasoning
 
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
         """Анализирует метаданные, заголовки, таблицы, FAQ и сплошной текст body."""

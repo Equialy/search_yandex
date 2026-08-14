@@ -241,3 +241,53 @@ CHAT_VISION_HTML_ONLY_HINT = """
 Формат ответа СТРОГО HTML + CSS. Без пояснений до или после. Без markdown. Без ```html.
 Если не можешь угадать цвет — используй доминирующие оттенки со скриншота.
 """
+
+VISION_DESIGN_EXTRACT_PROMPT = """
+Посмотри на скриншот сайта и извлеки визуальный дизайн-код бренда.
+
+Верни ТОЛЬКО JSON (без markdown) со значениями hex/rgb/css, которые реально видны на скриншоте:
+{
+  "primaryColor": "#...",
+  "secondaryColor": "#...",
+  "accentColor": "#...",
+  "gradientHeader": "linear-gradient(...) или null",
+  "bodyBackground": "#...",
+  "bodyTextColor": "#...",
+  "headingColor": "#...",
+  "h2Color": "#...",
+  "linkColor": "#...",
+  "tableHeaderBackground": "#... или gradient",
+  "tableHeaderTextColor": "#...",
+  "tableBorderColor": "#...",
+  "tableRowAltBackground": "#...",
+  "fontFamily": "шрифт или sans-serif",
+  "borderRadius": "8px",
+  "buttonBackground": "gradient или цвет",
+  "metaBlockBackground": "#...",
+  "notes": "кратко: что делает сайт узнаваемым визуально"
+}
+
+Не используй placeholder-цвета (#f5f5f5, #ccc) — только то, что видишь на скриншоте.
+"""
+
+VISION_STYLE_APPLY_PROMPT = """
+Ты frontend-разработчик. Примени design tokens к HTML-статье.
+
+ПРАВИЛА:
+1. Сохрани ВСЕ тексты, заголовки, таблицы и структуру markup БЕЗ ИЗМЕНЕНИЙ.
+2. Напиши новый блок <style> с классами seo-article*, используя tokens ниже.
+3. Используй gradientHeader для h1 или акцентных блоков, primaryColor/secondaryColor для заголовков.
+4. Таблицы — tableHeaderBackground, tableBorderColor, tableRowAltBackground как на референсе.
+5. Фон статьи — bodyBackground (часто белый), текст — bodyTextColor.
+6. НЕ используй дефолтные серые #f5f5f5/#ccc если tokens другие.
+7. Ответ: только <style>...</style> + существующий markup (div.seo-article...). Без markdown.
+
+DESIGN TOKENS:
+{design_tokens}
+
+ЗАПРОС ПОЛЬЗОВАТЕЛЯ:
+{user_prompt}
+
+MARKUP СТАТЬИ (не меняй текст, только добавь/замени class-стили через CSS):
+{article_markup}
+"""

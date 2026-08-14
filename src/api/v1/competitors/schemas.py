@@ -47,6 +47,25 @@ class ChatContextRequest(BaseDTO):
     prompt: str = Field(..., example="Напиши краткое содержание ранее сгенерированной статьи")
 
 
+class ChatHistoryMessageDTO(BaseDTO):
+    role: str
+    content: str
+    message_type: str = "message"
+    is_truncated: bool = False
+    has_image: bool = False
+    html_content: str | None = None
+    article_version: int | None = None
+
+
+class ArticleHistoryItemDTO(BaseDTO):
+    id: uuid.UUID
+    title: str
+    content_preview: str = ""
+    reasoning: str | None = None
+    created_at: datetime
+    content: str
+
+
 class ArticleResponse(BaseDTO):
     id: uuid.UUID
     project_id: uuid.UUID
@@ -56,6 +75,7 @@ class ArticleResponse(BaseDTO):
     created_at: datetime
     target_site: str | None = None
     target_site_parse: TargetSiteParseDTO | None = None
+    content_preview: str | None = None
 
 
 class CompetitorDetailDTO(BaseDTO):
@@ -89,5 +109,9 @@ class ProjectDetailDTO(BaseDTO):
     keyword: str
     competitors: list[CompetitorDetailDTO] = []
     articles: list[ArticleResponse] = []
+    chat_history: list[ChatHistoryMessageDTO] = []
+    generation_history: list[ArticleHistoryItemDTO] = []
+    latest_article_content: str | None = None
+    latest_article_title: str | None = None
     created_at: datetime
     updated_at: datetime
