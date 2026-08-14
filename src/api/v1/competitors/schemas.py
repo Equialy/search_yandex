@@ -49,6 +49,7 @@ class CompetitorDetailDTO(BaseDTO):
     url: str
     title: str | None = None
     graph_data: Any = None
+    raw_text: str | None = None
     summary: str | None = None
 
 

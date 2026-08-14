@@ -8,6 +8,7 @@ from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
 from src.application.use_cases.get_project import GetProjectUseCase
 from src.application.use_cases.list_projects import ListProjectsUseCase
+from src.infrastructure.gateways.site_parser import SiteParserGateway
 
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
 
@@ -131,3 +132,15 @@ async def get_project(
         if "Проект не найден" in str(e):
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post(
+    "/debug-parser",
+    summary="Отладка парсера: Посмотреть, что собирается с сайта"
+)
+async def debug_parser(
+    url: str,
+    parser: FromDishka[SiteParserGateway]
+):
+    return await parser.parse_site_to_graph(url)

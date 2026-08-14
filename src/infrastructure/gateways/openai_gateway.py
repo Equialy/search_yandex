@@ -81,20 +81,40 @@ class OpenAiGateway:
 
         return content, reasoning, updated_history
 
+        # src/infrastructure/gateways/openai_gateway.py
+
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
-        """Анализирует Title, Description и центральный текст body на коммерческие факторы и LSA/LSI."""
+        """Анализирует метаданные, заголовки, таблицы, FAQ и сплошной текст body."""
+        seo = parsed_data.get('seo_meta', {})
+        struct = parsed_data.get('content_structure', {})
+
+        headings_list = [f"- [{h.get('level', 'H')}] {h.get('text', '')}" for h in struct.get('headings', [])]
+        headings_text = "\n".join(headings_list) or "Нет данных"
+
+        tables_text = "\n---\n".join(struct.get('tables', [])) or "Нет таблиц"
+        faq_text = "\n---\n".join(struct.get('faq_blocks', [])) or "Нет явных FAQ блоков"
+
         prompt = f"""
         Проведи глубокий коммерческий и LSA-анализ страницы конкурента {parsed_data.get('url')}:
 
         1. МЕТАДАННЫЕ СТРАНИЦЫ:
-        - Title: "{parsed_data.get('title')}"
-        - Description: "{parsed_data.get('description')}"
+        - Title: "{seo.get('title', parsed_data.get('title'))}"
+        - Description: "{seo.get('description', parsed_data.get('description'))}"
 
-        2. ЦЕНТРАЛЬНЫЙ ТЕКСТ СТРАНИЦЫ (BODY):
-        {parsed_data.get('body_text')}
+        2. СТРУКТУРА И ИЕРАРХИЯ ЗАГОЛОВКОВ (H1-H4):
+        {headings_text}
 
-        ЗАДАЧИ АНАЛИЗА :
-        1. КОММЕРЧЕСКИЕ ФАКТОРЫ: выдели найденные цены, вилки стоимости, гарантии, призывы к действию (CTA), этапы работ, коммерческие блоки.
+        3. НАЙДЕННЫЕ ТАБЛИЦЫ (Цены, Сравнения, Характеристики):
+        {tables_text}
+
+        4. НАЙДЕННЫЕ ВОПРОСЫ И ОТВЕТЫ (FAQ):
+        {faq_text}
+
+        5. ПОЛНЫЙ ЦЕНТРАЛЬНЫЙ ТЕКСТ СТРАНИЦЫ (BODY):
+        {parsed_data.get('body_text', '')[:4000]}
+
+        ЗАДАЧИ АНАЛИЗА ПО МЕТОДИЧКЕ:
+        1. КОММЕРЧЕСКИЕ ФАКТОРЫ: выдели точные цены из таблиц/текста, гарантии, призывы к действию (CTA), этапы работ, коммерческие пакеты.
         2. LSA / LSI СЕМАНТИКА: выпиши ключевые тематические термины, коммерческие «хвосты» и профессиональную лексику ниши, использованную на этой странице.
         3. СИЛЬНЫЕ И СЛАБЫЕ СТОРОНЫ СТРАНИЦЫ: что сделано отлично и каких элементов/смыслов не хватает.
         4. ВЫЖИМКА ДЛЯ НАШЕЙ СТАТЬИ: 3-5 главных тезисов и смысловых блоков, которые обязательно нужно применить в нашей статье.

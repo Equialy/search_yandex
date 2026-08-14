@@ -60,6 +60,7 @@ class CompetitorData(Base):
     title: Mapped[str | None] = mapped_column(String(500))
 
     graph_data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text)
 
 

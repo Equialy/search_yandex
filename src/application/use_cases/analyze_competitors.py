@@ -139,6 +139,7 @@ class AnalyzeCompetitorsUseCase:
                         "description": site_desc,
                         "body_text": parsed_site.get("body_text")
                     },
+                    raw_text=parsed_site.get("body_text"),
                     summary=summary
                 )
                 await uow.competitors.add(competitor)
