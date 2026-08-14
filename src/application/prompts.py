@@ -174,22 +174,51 @@ Description:
 """
 
 ARTICLE_HTML_FORMAT_TEXT = """
-ФОРМАТ ОТВЕТА — ТОЛЬКО HTML (для публикации в CMS: Joomla, WordPress и т.д.):
+ФОРМАТ ОТВЕТА — HTML + CSS НА ОДНОЙ СТРАНИЦЕ (готово для вставки в Joomla/CMS):
 
-• Верни готовый HTML-фрагмент тела статьи. БЕЗ markdown (#, **, |, ```).
-• НЕ оборачивай ответ в ```html и не добавляй <html>, <head>, <body>.
-• Используй семантические теги: <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>.
-• Таблицы — только через <table>, <thead>, <tbody>, <tr>, <th>, <td>.
-• Title и Description в начале статьи:
-  <p><strong>Title:</strong> ...</p>
-  <p><strong>Description:</strong> ...</p>
-• Затем <h1> с главным заголовком страницы.
-• Все теги должны быть корректно закрыты.
-• Не используй inline-стили и <script>.
+• В начале ответа ОБЯЗАТЕЛЬНО блок <style> с CSS-классами для всей статьи.
+• Сразу после </style> — HTML-разметка с этими классами на тегах.
+• Все стили — ТОЛЬКО через классы (префикс seo-article). БЕЗ inline style="" и БЕЗ <script>.
+• БЕЗ markdown (#, **, |, ```). НЕ оборачивай ответ в ```html.
+• НЕ добавляй <html>, <head>, <body> — только <style> + фрагмент контента.
+
+ОБЯЗАТЕЛЬНАЯ СТРУКТУРА:
+
+<style>
+  .seo-article { ... базовые стили контейнера: шрифт, цвет, line-height, max-width ... }
+  .seo-article__meta { ... блок Title/Description ... }
+  .seo-article h1 { ... }
+  .seo-article h2, .seo-article h3 { ... }
+  .seo-article p { ... }
+  .seo-article ul, .seo-article ol { ... }
+  .seo-article__table { width: 100%; border-collapse: collapse; ... }
+  .seo-article__table th, .seo-article__table td { border: 1px solid #ccc; padding: 8px; ... }
+  .seo-article__table thead { background: #f5f5f5; ... }
+</style>
+
+<div class="seo-article">
+  <div class="seo-article__meta">
+    <p><strong>Title:</strong> ...</p>
+    <p><strong>Description:</strong> ...</p>
+  </div>
+  <h1>Главный заголовок</h1>
+  <p>...</p>
+  <h2>...</h2>
+  <table class="seo-article__table">...</table>
+  ...
+</div>
+
+ПРАВИЛА:
+• Используй семантические теги: h1 (один), h2, h3, p, ul, ol, li, strong, em, table, thead, tbody, tr, th, td.
+• Таблицы — с class="seo-article__table", заголовки колонок короткие (1–3 слова).
+• CSS должен быть аккуратным, читаемым, без @import и url() на внешние ресурсы.
+• Все теги корректно закрыты.
 """
 
 CHAT_HTML_REFINEMENT_HINT = """
-Если пользователь просит изменить, дополнить или переписать статью — верни обновлённый HTML-фрагмент
-(тот же формат, что при генерации: без markdown, без обёрток ```html).
+Если пользователь просит изменить, дополнить, стилизовать или переписать статью — верни ПОЛНЫЙ обновлённый
+HTML-фрагмент в том же формате: сначала <style> с CSS-классами (префикс seo-article), затем <div class="seo-article">...
+Обязательно включай блок <style>, даже если пользователь просит только «добавить стили».
+Без markdown, без обёрток ```html, без <html>/<head>/<body>. Не отвечай кратким текстом — только полный HTML статьи.
 Если вопрос не про правку статьи — отвечай обычным текстом.
 """
