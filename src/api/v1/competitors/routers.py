@@ -1,6 +1,8 @@
+import base64
 import uuid
+
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from src.api.v1.competitors import schemas
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
@@ -11,6 +13,9 @@ from src.application.use_cases.list_projects import ListProjectsUseCase
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
+
+MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024
+ALLOWED_CHAT_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
 @router.post(
@@ -99,17 +104,39 @@ async def parse_site(
 
 @router.post(
     "/projects/{project_id}/chat",
-    summary="3. Чат и доработка статьи в контексте проекта"
+    summary="3. Чат и доработка статьи в контексте проекта (multipart: prompt + опционально image)",
 )
 async def chat_with_context(
     project_id: uuid.UUID,
-    payload: schemas.ChatContextRequest,
-    use_case: FromDishka[ContinueContextChatUseCase]
+    use_case: FromDishka[ContinueContextChatUseCase],
+    prompt: str = Form(..., description="Текст запроса к статье"),
+    image: UploadFile | None = File(None, description="Скриншот сайта для стилизации статьи"),
 ):
     try:
+        image_base64: str | None = None
+        image_mime_type = "image/png"
+
+        if image and image.filename:
+            raw = await image.read()
+            if len(raw) > MAX_CHAT_IMAGE_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Изображение слишком большое (максимум 5 МБ)",
+                )
+            mime = image.content_type or "image/png"
+            if mime not in ALLOWED_CHAT_IMAGE_TYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Неподдерживаемый формат изображения: {mime}",
+                )
+            image_base64 = base64.b64encode(raw).decode("ascii")
+            image_mime_type = mime
+
         response_text = await use_case.execute(
             project_id=project_id,
-            user_prompt=payload.prompt
+            user_prompt=prompt,
+            image_base64=image_base64,
+            image_mime_type=image_mime_type,
         )
         return {"response": response_text}
     except ValueError as e:

@@ -1,7 +1,16 @@
 from typing import Any
+
 from openai import AsyncOpenAI
 
 from src.config.settings import settings
+
+
+def _build_image_content_part(image_base64: str, mime_type: str) -> dict[str, Any]:
+    data_url = f"data:{mime_type};base64,{image_base64}"
+    return {
+        "type": "image_url",
+        "image_url": {"url": data_url, "detail": "high"},
+    }
 
 
 class OpenAiGateway:
@@ -10,35 +19,45 @@ class OpenAiGateway:
     def __init__(self, openai_client: AsyncOpenAI):
         self._client = openai_client
         self._model = settings.OPENAI.MODEL
+        self._vision_model = settings.OPENAI.VISION_MODEL
+
+    def _normalize_message_for_api(self, msg: dict[str, Any]) -> dict[str, Any]:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if isinstance(content, list):
+            return {"role": role, "content": content}
+
+        return {"role": role, "content": str(content)}
+
+    def _history_has_images(self, messages: list[dict[str, Any]]) -> bool:
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    return True
+        return False
 
     async def generate_completion_with_reasoning(
         self,
         messages: list[dict[str, Any]],
-        reasoning_effort: str = "high"
+        reasoning_effort: str = "high",
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
     ) -> tuple[str, str]:
         """Генерирует ответ через OpenAI API."""
-        formatted_messages = []
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-
-            # Если content пришел в формате KIE [{'type': 'text', 'text': '...'}] -> распаковываем в текст
-            if isinstance(content, list):
-                text_parts = [
-                    item.get("text", "")
-                    for item in content
-                    if isinstance(item, dict) and item.get("type") == "text"
-                ]
-                text_content = "\n".join(text_parts) if text_parts else str(content)
-            else:
-                text_content = str(content)
-
-            formatted_messages.append({"role": role, "content": text_content})
+        formatted_messages = [self._normalize_message_for_api(msg) for msg in messages]
+        use_model = model or (
+            self._vision_model if self._history_has_images(formatted_messages) else self._model
+        )
 
         response = await self._client.chat.completions.create(
-            model=self._model,
+            model=use_model,
             messages=formatted_messages,
-            temperature=0.7,
+            temperature=temperature,
         )
 
         message = response.choices[0].message
@@ -62,15 +81,32 @@ class OpenAiGateway:
     async def completion_with_history(
         self,
         history: list[dict[str, Any]],
-        user_prompt: str
+        user_prompt: str,
+        *,
+        image_base64: str | None = None,
+        image_mime_type: str = "image/png",
+        temperature: float = 0.7,
     ) -> tuple[str, str, list[dict[str, Any]]]:
         """Возвращает (текст ответа, рассуждения, обновленная история)."""
         updated_history = list(history)
-        updated_history.append({"role": "user", "content": user_prompt})
+
+        if image_base64:
+            user_content: str | list[dict[str, Any]] = [
+                _build_image_content_part(image_base64, image_mime_type),
+                {"type": "text", "text": user_prompt},
+            ]
+            model = self._vision_model
+        else:
+            user_content = user_prompt
+            model = None
+
+        updated_history.append({"role": "user", "content": user_content})
 
         content, reasoning = await self.generate_completion_with_reasoning(
             updated_history,
-            reasoning_effort="high"
+            reasoning_effort="high",
+            model=model,
+            temperature=temperature,
         )
 
         updated_history.append({
@@ -80,7 +116,6 @@ class OpenAiGateway:
         })
 
         return content, reasoning, updated_history
-
 
     async def summarize_site(self, parsed_data: dict[str, Any]) -> str:
         """Анализирует метаданные, заголовки, таблицы, FAQ и сплошной текст body."""

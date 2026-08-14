@@ -83,6 +83,10 @@ class Proxy(BaseModel):
 class OpenAI(BaseModel):
     API_KEY: str
     MODEL: str
+    VISION_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="Модель для запросов с изображением (gpt-4o-mini поддерживает vision)",
+    )
 
 
 class Settings(BaseSettings):
