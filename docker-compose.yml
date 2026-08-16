@@ -3,20 +3,22 @@ services:
 
 
 
-#  backend:
-#    build: .
-#    container_name: search_yandex
-#    env_file:
-#      - .env
-#    ports:
-#      - "${APP_PORT:-8000}:8000"
-#    depends_on:
-#      postgres:
-#        condition: service_healthy
-#      redis:
-#        condition: service_started
-#    networks:
-#      - app_network
+  backend:
+    build: .
+    container_name: search_yandex
+    env_file:
+      - .env
+    environment:
+      DB__PG__HOST: postgres
+      DB__PG__PORT: 5432
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+    restart: unless-stopped
 
 
 

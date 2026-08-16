@@ -10,15 +10,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
 COPY pyproject.toml uv.lock ./
 
 RUN uv sync --locked --no-install-project --no-dev
-#ENV PATH="/app/.venv/bin:$PATH"
-#COPY docker-build/entrypoint.sh /scripts/entrypoint.sh
-#RUN chmod +x /scripts/entrypoint.sh
 
 COPY . .
 
-RUN mkdir -p /app/logs /app/dist
+RUN mkdir -p /app/logs /app/exports/analysis /app/exports/articles /app/dist && \
+    chmod +x /app/docker-build/entrypoint.sh
 
 EXPOSE 8000
 
-#ENTRYPOINT ["/scripts/entrypoint.sh"]
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["sh", "/app/docker-build/entrypoint.sh"]

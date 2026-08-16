@@ -1,0 +1,13 @@
+# Секреты не должны попадать в образ — конфигурация передаётся
+# через env_file/environment в docker-compose
+.env
+.env.*
+
+.git
+.venv
+__pycache__
+*.pyc
+logs/
+dist/
+.idea
+.cursor
