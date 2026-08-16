@@ -1,5 +1,3 @@
-# src/bootstrap.py
-
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
@@ -12,6 +10,9 @@ from src.application.mcp.router import router as mcp_connect_router
 # Импорты MCP для bootstrap
 from src.application.mcp.server import mount_mcp
 from src.application.mcp.proxy import set_mcp_app
+
+
+from src.api.v1.auth.routers import router as auth_router
 
 from src.config.settings import BASE_DIR
 
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
 
 
 def apply_routes(app: FastAPI) -> FastAPI:
+    app.include_router(auth_router)
     app.include_router(competitors_router)
     app.include_router(text_router)
     app.include_router(agent_router)

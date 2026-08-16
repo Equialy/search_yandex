@@ -3,6 +3,7 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 
+from src.application.ioc.auth import AuthProvider
 from src.application.ioc.competitors import CompetitorsProvider
 from src.application.ioc.gateways import GatewaysProvider
 from src.application.ioc.infrastructure import InfrastructureProvider
@@ -11,7 +12,6 @@ from src.middlewares import apply_middleware
 from dishka.integrations.fastapi import setup_dishka, FastapiProvider
 from dishka import make_async_container
 from src.config.settings import settings, config_logging
-from src.application.mcp.proxy import set_mcp_app
 
 
 
@@ -19,6 +19,8 @@ container = make_async_container(
     InfrastructureProvider(),
     GatewaysProvider(),
     CompetitorsProvider(),
+
+    AuthProvider(),
     FastapiProvider(),
 )
 

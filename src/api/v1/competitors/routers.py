@@ -15,6 +15,7 @@ from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase, build_target_site_parse
 from src.application.use_cases.get_project import GetProjectUseCase
 from src.application.use_cases.list_projects import ListProjectsUseCase
+from src.infrastructure.database.models import User
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
@@ -113,6 +114,7 @@ async def parse_site(
 )
 async def chat_with_context(
     project_id: uuid.UUID,
+    admin: FromDishka[User] ,
     use_case: FromDishka[ContinueContextChatUseCase],
     prompt: str = Form(..., description="Текст запроса к статье"),
     image: UploadFile | None = File(None, description="Скриншот сайта для стилизации статьи"),
