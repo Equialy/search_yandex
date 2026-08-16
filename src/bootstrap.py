@@ -46,23 +46,26 @@ def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(agent_router)
     app.include_router(mcp_connect_router)
 
-    # Монтируем единственный экземпляр на /mcp
     app.mount("/mcp", mount_mcp())
 
     if DIST_DIR.is_dir():
-        app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="static-assets")
+        assets_dir = DIST_DIR / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="static-assets")
 
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def spa_fallback(full_path: str):
-            if full_path == "api" or full_path.startswith("api/"):
-                raise HTTPException(status_code=404, detail="Not found")
+        index_file = DIST_DIR / "index.html"
+        if index_file.is_file():
+            @app.get("/{full_path:path}", include_in_schema=False)
+            async def spa_fallback(full_path: str):
+                if full_path in ("api", "v1") or full_path.startswith(("api/", "v1/")):
+                    raise HTTPException(status_code=404, detail="Not found")
 
-            if any(part.startswith('.') for part in full_path.split('/')):
-                raise HTTPException(status_code=404, detail="Not found")
+                if any(part.startswith('.') for part in full_path.split('/')):
+                    raise HTTPException(status_code=404, detail="Not found")
 
-            file = DIST_DIR / full_path
-            if file.is_file():
-                return FileResponse(file)
-            return FileResponse(DIST_DIR / "index.html")
+                file = DIST_DIR / full_path
+                if file.is_file():
+                    return FileResponse(file)
+                return FileResponse(index_file)
 
     return app
