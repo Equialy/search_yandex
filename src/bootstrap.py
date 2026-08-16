@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 import httpx
-from fastapi import FastAPI
-
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from src.api.v1.agent.routers import router as agent_router
 from src.api.v1.competitors.routers import router as competitors_router
 from src.api.v1.text_router.routers import router as text_router
@@ -47,5 +48,21 @@ def apply_routes(app: FastAPI) -> FastAPI:
 
     # Монтируем единственный экземпляр на /mcp
     app.mount("/mcp", mount_mcp())
+
+    if DIST_DIR.is_dir():
+        app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="static-assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not found")
+
+            if any(part.startswith('.') for part in full_path.split('/')):
+                raise HTTPException(status_code=404, detail="Not found")
+
+            file = DIST_DIR / full_path
+            if file.is_file():
+                return FileResponse(file)
+            return FileResponse(DIST_DIR / "index.html")
 
     return app
