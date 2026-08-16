@@ -5,6 +5,7 @@ from dishka.integrations.fastapi import FromDishka, DishkaRoute
 from src.api.v1.text_router import schema
 from src.api.v1.text_router.schema import DetectResponse, TextRequest, HumanizeResponse
 from src.api.v1.text_router.service import TextAiService
+from src.infrastructure.database.models import User
 
 router = APIRouter(
     prefix="/v1/text",
@@ -17,6 +18,7 @@ router = APIRouter(
 async def detect_ai(
     req: TextRequest,
     service: FromDishka[TextAiService],
+    user: FromDishka[User],
 ):
     if not req.text.strip():
         raise HTTPException(
@@ -30,6 +32,7 @@ async def detect_ai(
 async def humanize(
     req: TextRequest,
     service: FromDishka[TextAiService],
+    user: FromDishka[User],
 ):
     if not req.text.strip():
         raise HTTPException(
@@ -46,6 +49,7 @@ async def humanize(
 )
 async def calculate_nausea(
     payload: schema.CalculateNauseaRequest,
-    service: FromDishka[TextAiService]
+    service: FromDishka[TextAiService],
+    user: FromDishka[User]
 ):
     return service.calculate_nausea(payload)

@@ -1,7 +1,6 @@
-from pydantic import BaseModel, EmailStr, ConfigDict, AliasGenerator
-from uuid import UUID
-from typing import Optional
 
+import uuid
+from pydantic import AliasChoices, AliasGenerator, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 common_config = ConfigDict(
@@ -13,23 +12,32 @@ common_config = ConfigDict(
     ),
 )
 
+
 class UserRegister(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6)
+
+    model_config = common_config
+
 
 class UserLogin(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=1)
+
+    model_config = common_config
+
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+    model_config = common_config
+
+
 class UserMeResponse(BaseModel):
-    id: UUID
+    id: uuid.UUID
     username: str
     role: str
-    tokens_balance: int
-    balance: float
+    is_active: bool
 
     model_config = common_config

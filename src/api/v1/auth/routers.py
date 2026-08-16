@@ -5,8 +5,9 @@ from src.api.v1.auth.schema import UserRegister, UserLogin, TokenResponse, UserM
 from src.application.use_cases.login_user import LoginUserUseCase
 from src.application.use_cases.registre_user import RegisterUserUseCase
 from src.config.settings import settings
+from src.infrastructure.database.models import User
 
-router = APIRouter(prefix=settings.api.v1.api_v1 + "/auth", tags=["Auth"], route_class=DishkaRoute)
+router = APIRouter(prefix="/v1/auth", tags=["Auth"], route_class=DishkaRoute)
 
 @router.post("/sign_up", response_model=UserMeResponse, status_code=status.HTTP_201_CREATED, summary="Регистрация администратора")
 async def register(
@@ -54,6 +55,12 @@ async def login(
     return TokenResponse(access_token=token)
 
 
+
+@router.get("/me", response_model=UserMeResponse, summary="Текущий профиль админа")
+async def get_me(
+    current_user: FromDishka[User],
+):
+    return current_user
 
 @router.post("/logout", summary="Выход из системы")
 async def logout(response: Response):

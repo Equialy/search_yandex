@@ -32,7 +32,8 @@ ALLOWED_CHAT_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"
 )
 async def analyze_competitors(
         payload: schemas.AnalyzeCompetitorsRequest,
-        use_case: FromDishka[AnalyzeCompetitorsUseCase]
+        use_case: FromDishka[AnalyzeCompetitorsUseCase],
+        user: FromDishka[User],
 ):
     try:
         project_id, urls, competitors = await use_case.execute(
@@ -65,7 +66,8 @@ async def analyze_competitors(
 async def generate_article(
     project_id: uuid.UUID,
     payload: schemas.GenerateArticleRequest,
-    use_case: FromDishka[GenerateArticleUseCase]
+    use_case: FromDishka[GenerateArticleUseCase],
+    user: FromDishka[User],
 ):
     try:
         result = await use_case.execute(
@@ -103,6 +105,7 @@ async def generate_article(
 async def parse_site(
     payload: schemas.ParseSiteRequest,
     parser: FromDishka[SiteParserGateway],
+    user: FromDishka[User],
 ):
     parsed = await parser.parse_site_to_graph(payload.url)
     return schemas.TargetSiteParseDTO.model_validate(build_target_site_parse(payload.url, parsed))
@@ -158,7 +161,8 @@ async def chat_with_context(
     summary="Получить список всех проектов с датами создания и обновления"
 )
 async def list_projects(
-    use_case: FromDishka[ListProjectsUseCase]
+    use_case: FromDishka[ListProjectsUseCase],
+    user: FromDishka[User],
 ):
     projects = await use_case.execute()
     return [schemas.ProjectListItemDTO.model_validate(p) for p in projects]
@@ -172,6 +176,7 @@ async def list_projects(
 async def get_project(
     project_id: uuid.UUID,
     use_case: FromDishka[GetProjectUseCase],
+    user: FromDishka[User],
 ):
     try:
         project = await use_case.execute(project_id)
@@ -243,6 +248,7 @@ async def get_project(
 )
 async def debug_parser(
     url: str,
-    parser: FromDishka[SiteParserGateway]
+    parser: FromDishka[SiteParserGateway],
+    user: FromDishka[User],
 ):
     return await parser.parse_site_to_graph(url)
