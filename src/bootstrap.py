@@ -47,25 +47,38 @@ def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(mcp_connect_router)
 
     app.mount("/mcp", mount_mcp())
+    # 3. Раздача React SPA фронтенда
+    index_file = DIST_DIR / "index.html"
+    assets_dir = DIST_DIR / "assets"
 
-    if DIST_DIR.is_dir():
-        assets_dir = DIST_DIR / "assets"
-        if assets_dir.is_dir():
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="static-assets")
+    print(
+        f"[Bootstrap]: Проверка статики -> DIST_DIR: {DIST_DIR} (exists: {DIST_DIR.exists()}), index.html: {index_file.is_file()}")
 
-        index_file = DIST_DIR / "index.html"
-        if index_file.is_file():
-            @app.get("/{full_path:path}", include_in_schema=False)
-            async def spa_fallback(full_path: str):
-                if full_path in ("api", "v1") or full_path.startswith(("api/", "v1/")):
-                    raise HTTPException(status_code=404, detail="Not found")
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="static-assets")
 
-                if any(part.startswith('.') for part in full_path.split('/')):
-                    raise HTTPException(status_code=404, detail="Not found")
+    if index_file.is_file():
+        # Явный маршрут для корня сайта (http://185.200.176.45:8000/)
+        @app.get("/", include_in_schema=False)
+        async def serve_root():
+            return FileResponse(index_file)
 
-                file = DIST_DIR / full_path
-                if file.is_file():
-                    return FileResponse(file)
-                return FileResponse(index_file)
+        # Маршрут для всех внутренних страниц React Router (/login, /projects, /agent и т.д.)
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            # Пропускаем системные API роуты
+            if full_path in ("api", "v1", "docs", "redoc", "openapi.json") or full_path.startswith(("api/", "v1/")):
+                raise HTTPException(status_code=404, detail="API not found")
+
+            # Если запрошен конкретный файл (favicon.ico, manifest.json)
+            file = DIST_DIR / full_path
+            if file.is_file():
+                return FileResponse(file)
+
+            # Для всех остальных путей отдаем index.html
+            return FileResponse(index_file)
+    else:
+        print(
+            "⚠️ [Bootstrap Warning]: Файл index.html НЕ найден в папке dist! Проверьте, что вы загрузили файлы фронтенда на сервер.")
 
     return app
