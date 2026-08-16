@@ -8,6 +8,6 @@
 __pycache__
 *.pyc
 logs/
-dist/
+
 .idea
 .cursor
