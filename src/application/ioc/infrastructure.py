@@ -36,10 +36,10 @@ class InfrastructureProvider(Provider):
         limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
         async with httpx.AsyncClient(limits=limits, timeout=15.0, trust_env=False) as client:
             yield client
-
-    @provide(scope=Scope.APP)
-    def get_openai_client(self) -> AsyncOpenAI:
-        return AsyncOpenAI(api_key=settings.OPENAI.API_KEY)
+    #
+    # @provide(scope=Scope.APP)
+    # def get_openai_client(self) -> AsyncOpenAI:
+    #     return AsyncOpenAI(api_key=settings.OPENAI.API_KEY)
 
     @provide(scope=Scope.APP)
     async def get_openai_client(self) -> AsyncGenerator[AsyncOpenAI, None]:
@@ -47,7 +47,7 @@ class InfrastructureProvider(Provider):
 
         openai_http_client = httpx.AsyncClient(
             proxy=proxy_url,
-            timeout=120.0,
+            timeout=260.0,
             trust_env=True,
         )
 
