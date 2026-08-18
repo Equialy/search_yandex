@@ -48,7 +48,7 @@ class InfrastructureProvider(Provider):
         openai_http_client = httpx.AsyncClient(
             proxy=proxy_url,
             timeout=120.0,
-            trust_env=False,
+            trust_env=True,
         )
 
         openai_client = AsyncOpenAI(
