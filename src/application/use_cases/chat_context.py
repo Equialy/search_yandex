@@ -39,9 +39,10 @@ class ContinueContextChatUseCase:
         *,
         image_base64: str | None = None,
         image_mime_type: str = "image/png",
+        user_id: uuid.UUID | None = None
     ) -> str:
         async with self._uow as uow:
-            project = await uow.projects.get_with_relations(project_id)
+            project = await uow.projects.get_with_relations(project_id,user_id=user_id)
             if not project:
                 raise ValueError("Проект не найден")
 

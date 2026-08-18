@@ -40,7 +40,9 @@ async def analyze_competitors(
             keyword=payload.keyword,
             url=payload.url,
             limit=payload.limit,
-            project_id=payload.project_id
+            project_id=payload.project_id,
+            user_id=user.id
+
         )
 
         competitor_dtos = [
@@ -74,7 +76,8 @@ async def generate_article(
             project_id=project_id,
             topic=payload.topic,
             instructions=payload.instructions,
-            target_site=payload.target_site
+            target_site=payload.target_site,
+            user_id=user.id
         )
         parse_dto = None
         if result.target_site_parse:
@@ -117,7 +120,7 @@ async def parse_site(
 )
 async def chat_with_context(
     project_id: uuid.UUID,
-    admin: FromDishka[User] ,
+    user: FromDishka[User] ,
     use_case: FromDishka[ContinueContextChatUseCase],
     prompt: str = Form(..., description="Текст запроса к статье"),
     image: UploadFile | None = File(None, description="Скриншот сайта для стилизации статьи"),
@@ -147,6 +150,7 @@ async def chat_with_context(
             user_prompt=prompt,
             image_base64=image_base64,
             image_mime_type=image_mime_type,
+            user_id=user.id
         )
         return {"response": response_text}
     except ValueError as e:
@@ -164,7 +168,7 @@ async def list_projects(
     use_case: FromDishka[ListProjectsUseCase],
     user: FromDishka[User],
 ):
-    projects = await use_case.execute()
+    projects = await use_case.execute(user_id=user.id)
     return [schemas.ProjectListItemDTO.model_validate(p) for p in projects]
 
 
@@ -179,7 +183,7 @@ async def get_project(
     user: FromDishka[User],
 ):
     try:
-        project = await use_case.execute(project_id)
+        project = await use_case.execute(project_id,user_id=user.id)
         articles = sorted(
             project.articles or [],
             key=lambda article: article.created_at,

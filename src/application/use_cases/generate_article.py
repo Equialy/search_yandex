@@ -77,10 +77,11 @@ class GenerateArticleUseCase:
             project_id: uuid.UUID,
             topic: str,
             instructions: str = "",
-            target_site: str = ""
-    ) -> GenerateArticleResult:
+            target_site: str = "",
+            user_id: uuid.UUID | None = None
+    ) -> Article:
         async with self._uow as uow:
-            project = await uow.projects.get_with_relations(project_id)
+            project = await uow.projects.get_with_relations(project_id, user_id=user_id)
             if not project:
                 raise ValueError("Проект не найден")
 

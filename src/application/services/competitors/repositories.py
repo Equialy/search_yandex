@@ -12,7 +12,7 @@ class ProjectRepository(BaseRepository[Project]):
     def __init__(self, session: AsyncSession):
         super().__init__(Project, session)
 
-    async def get_with_relations(self, project_id: uuid.UUID) -> Project | None:
+    async def get_with_relations(self, project_id: uuid.UUID, user_id: uuid.UUID| None = None) -> Project | None:
         stmt = (
             select(Project)
             .where(Project.id == project_id)
@@ -21,12 +21,15 @@ class ProjectRepository(BaseRepository[Project]):
                 selectinload(Project.articles),
             )
         )
+        if user_id is not None:
+            stmt = stmt.where(Project.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_all_ordered_by_updated(self, skip: int = 0, limit: int = 50) -> list[Project]:
+    async def get_all_ordered_by_updated(self,  user_id: uuid.UUID, skip: int = 0, limit: int = 50) -> list[Project]:
         stmt = (
             select(Project)
+            .where(Project.user_id == user_id)
             .options(
                 selectinload(Project.competitors),
                 selectinload(Project.articles),

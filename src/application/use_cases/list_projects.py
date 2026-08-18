@@ -16,14 +16,12 @@ class ProjectListItem:
 
 
 class ListProjectsUseCase:
-    """Получение списка всех проектов/сессий для выбора на фронтенде."""
-
     def __init__(self, uow: UnitOfWorkProtocol):
         self._uow = uow
 
-    async def execute(self) -> list[ProjectListItem]:
+    async def execute(self, user_id: uuid.UUID) -> list[ProjectListItem]:
         async with self._uow as uow:
-            projects = await uow.projects.get_all_ordered_by_updated()
+            projects = await uow.projects.get_all_ordered_by_updated(user_id=user_id)
             return [
                 ProjectListItem(
                     id=p.id,

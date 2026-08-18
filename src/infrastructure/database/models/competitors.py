@@ -18,8 +18,12 @@ class Project(Base):
         primary_key=True,
         server_default=func.uuidv7()
     )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
     keyword: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-
     # Хранит всю историю сообщений для нейросети: [{"role": "system", "content": "..."}, ...]
     chat_history: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
@@ -28,7 +32,7 @@ class Project(Base):
     )
 
 
-
+    user: Mapped["User"] = relationship("User", back_populates="projects")
     competitors: Mapped[list["CompetitorData"]] = relationship("CompetitorData", back_populates="project",
                                                                cascade="all, delete-orphan")
     articles: Mapped[list["Article"]] = relationship("Article", back_populates="project", cascade="all, delete-orphan")
