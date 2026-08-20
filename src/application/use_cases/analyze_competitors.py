@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
-from application.prompts import ANALYZE_CONCURENTS
+from src.application.prompts import ANALYZE_CONCURENTS
 from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
