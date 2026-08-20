@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
+from application.prompts import ANALYZE_CONCURENTS
 from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
@@ -83,12 +84,15 @@ class AnalyzeCompetitorsUseCase:
                     {
                         "role": "system",
                         "content": f"""Ты — главный коммерческий SEO-копирайтер и эксперт по анализу конкурентов.
-                        Твоя задача — накапливать выжимки сайтов конкурентов и сайта пользователя, а затем создавать материалы по методичке:
+                        Твоя задача — накапливать выжимки сайтов конкурентов и сайта пользователя и проанализировать 
+                        конкурентов для дальнейшей генерации статьи моего сайта:
                         
-                        {SEO_GUIDELINE_TEXT}
+                        {ANALYZE_CONCURENTS}
                         """
                     }
                 ]
+                # {SEO_GUIDELINE_TEXT}
+
                 project = Project(
                     user_id=user_id,
                     keyword=keyword or url or "Анализ",

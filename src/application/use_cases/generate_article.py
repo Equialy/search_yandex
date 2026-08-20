@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from sqlalchemy.orm.attributes import flag_modified
 
-from src.application.prompts import SEO_GUIDELINE_TEXT, ARTICLE_HTML_FORMAT_TEXT
+from src.application.prompts import ARTICLE_HTML_FORMAT_TEXT, SEO_GENERATE_ARTICLE
 from src.application.article_format import normalize_article_html
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
@@ -79,7 +79,7 @@ class GenerateArticleUseCase:
             instructions: str = "",
             target_site: str = "",
             user_id: uuid.UUID | None = None
-    ) -> Article:
+    ) -> GenerateArticleResult:
         async with self._uow as uow:
             project = await uow.projects.get_with_relations(project_id, user_id=user_id)
             if not project:
@@ -104,40 +104,39 @@ class GenerateArticleUseCase:
                     {parsed_target.get('body_text')}
                     """
 
+
+            competitor_lengths = [
+                len(c.raw_text)
+                for c in (project.competitors or [])
+                if c.raw_text and len(c.raw_text.strip()) > 200
+            ]
+
+            if competitor_lengths:
+                avg_chars = sum(competitor_lengths) // len(competitor_lengths)
+                min_chars = int(avg_chars * 0.85)
+                max_chars = int(avg_chars * 1.15)
+                volume_instruction = f"""
+                    ТРЕБОВАНИЕ К ОБЪЕМУ СТАТЬИ (НА ОСНОВЕ РАСЧЕТА КОНКУРЕНТОВ):
+                    • Средний объем текста у проанализированных конкурентов: ~{avg_chars} символов с пробелами.
+                    • ОБЯЗАТЕЛЬНО напиши статью сопоставимого объема: целевой ориентир {avg_chars} символов (диапазон от {min_chars} до {max_chars} символов).
+                    • Чтобы набрать этот объем без «воды», подробно раскрывай каждый блок, этапы, нюансы, приводи списки, таблицы и практические пояснения.
+                    """
+            else:
+                volume_instruction = "ТРЕБОВАНИЕ К ОБЪЕМУ: Напиши развернутую статью объемом 5000–8000 символов с пробелами."
+
+            print(
+                f"[GenerateArticleUseCase]: Рассчитан целевой объем: {avg_chars if competitor_lengths else 'дефолт'} символов")
+
+
             prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
-                    
-                                       
-                    СТРОГИЕ ПРАВИЛА ЧЕЛОВЕЧНОСТИ И СТИЛЯ:
-                    1. ЗАПРЕЩЕНО использовать технические названия блоков в заголовках (НЕ пиши 'Вводный блок', 'Описание услуги', 'Наши преимущества', 'Кейсы и гарантии', 'Финальный абзац'). Заголовки H2/H3 должны звучать естественного для человека (например: 'Этапы работы', 'Риски и штрафы', 'Почему выгодно работать с нами').
-                    2. НИКАКОГО МЕХАНИЧЕСКОГО ПЕРЕСПАМА: не вставляй дословно длинную фразу '{topic} {company_name}' в каждый заголовок и таблицу. Склоняй слова и вписывай их органично в предложения.
-                    3. ЭКСПЕРТНОСТЬ И БОЛИ КЛИЕНТА: Избегай пустой воды ('индивидуальный подход', 'высокое качество'). Пиши про реальные финансовые/юридические риски клиента, конкретные законы, штрафы и процессы.
-                    4. ТАБЛИЦЫ: Колонки таблицы должны иметь короткие названия ('Критерий | Конкуренты | {company_name}').
-                    
-                    ОБЯЗАТЕЛЬНАЯ СТРУКТУРА СТАТЬИ ПО МЕТОДИЧКЕ:
-                    1. TITLE И DESCRIPTION:
-                       - Title (до 70 симв.): главный ключ + '{company_name}' + выгода.
-                       - Description (150-160 симв.): главный ключ + '{company_name}' + условия/цена.
-                    
-                    2. H1: Единый главный заголовок страницы с главным ключом.
-                    
-                    3. ВВОДНЫЙ РАЗДЕЛ (Первый абзац содержит главный ключ и имя компании).
-                    
-                    4. СРАВНЕНИЕ С КОНКУРЕНТАМИ РЫНКА (Таблица + разбор слабых мест рынка).
-                    
-                    5. НАШИ ПРЕИМУЩЕСТВА (Конкретные факты и цифры).
-                    
-                    6. ЭТАПЫ РАБОТ И ФАКТОРЫ СТОИМОСТИ (Таблица цен).
-                    
-                    7. ДОКАЗАТЕЛЬСТВА И ГАРАНТИИ (Отзывы, риски, гарантии договора).
-                    
-                    8. ЗАКЛЮЧЕНИЕ (Последний абзац содержит главный ключ и имя компании).   
-                    
+
                     {target_data_prompt}
-                    
-                                                      
-                    СТРОГИЕ ПРАВИЛА ВЕРСТКИ И МЕТОДИЧКИ:
-                    {SEO_GUIDELINE_TEXT}
-                    
+
+                    {volume_instruction}
+
+                    СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
+                    {SEO_GENERATE_ARTICLE}
+
                     ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
                     {instructions}
 

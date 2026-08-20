@@ -58,7 +58,7 @@ class OpenAiGateway:
         response = await self._client.chat.completions.create(
             model=use_model,
             messages=formatted_messages,
-            temperature=temperature,
+            # temperature=temperature,
         )
 
         message = response.choices[0].message
@@ -75,7 +75,8 @@ class OpenAiGateway:
         """Возвращает только текст ответа."""
         content, _ = await self.generate_completion_with_reasoning(
             messages=messages,
-            reasoning_effort=reasoning_effort
+            reasoning_effort=reasoning_effort,
+
         )
         return content
 
@@ -108,7 +109,7 @@ class OpenAiGateway:
             updated_history,
             reasoning_effort="high",
             model=model,
-            temperature=temperature,
+            # temperature=temperature,
         )
 
         if history_user_content is not None:
@@ -141,7 +142,7 @@ class OpenAiGateway:
         kwargs: dict[str, Any] = {
             "model": self._vision_model,
             "messages": messages,
-            "temperature": temperature,
+            # "temperature": temperature,
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
@@ -165,7 +166,7 @@ class OpenAiGateway:
             VISION_DESIGN_EXTRACT_PROMPT,
             image_base64,
             image_mime_type,
-            temperature=0.15,
+            # temperature=0.15,
             json_mode=True,
         )
 
@@ -180,7 +181,7 @@ class OpenAiGateway:
         content, reasoning = await self.generate_completion_with_reasoning(
             messages,
             model=self._model,
-            temperature=0.25,
+            # temperature=0.25,
         )
         return content, reasoning
 
@@ -212,13 +213,13 @@ class OpenAiGateway:
         {faq_text}
 
         5. ПОЛНЫЙ ЦЕНТРАЛЬНЫЙ ТЕКСТ СТРАНИЦЫ (BODY):
-        {parsed_data.get('body_text', '')[:4000]}
+        {parsed_data.get('body_text', '')}
 
         ЗАДАЧИ АНАЛИЗА ПО МЕТОДИЧКЕ:
         1. КОММЕРЧЕСКИЕ ФАКТОРЫ: выдели точные цены из таблиц/текста, гарантии, призывы к действию (CTA), этапы работ, коммерческие пакеты.
         2. LSA / LSI СЕМАНТИКА: выпиши ключевые тематические термины, коммерческие «хвосты» и профессиональную лексику ниши, использованную на этой странице.
         3. СИЛЬНЫЕ И СЛАБЫЕ СТОРОНЫ СТРАНИЦЫ: что сделано отлично и каких элементов/смыслов не хватает.
-        4. ВЫЖИМКА ДЛЯ НАШЕЙ СТАТЬИ: 3-5 главных тезисов и смысловых блоков, которые обязательно нужно применить в нашей статье.
+        4. ВЫЖИМКА ДЛЯ НАШЕЙ СТАТЬИ: главных тезисов и смысловых блоков, которые обязательно нужно применить в нашей статье.
         """
         messages = [{"role": "user", "content": prompt}]
         return await self.generate_completion(messages, reasoning_effort="high")
