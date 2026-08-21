@@ -286,7 +286,7 @@ class SiteParserGateway:
                         md_report.append("")
 
                 if headings:
-                    md_report.append("### 🏷 Структура заголовков (H1–H4):")
+                    md_report.append("### Структура заголовков (H1–H4):")
                     for h in headings:
                         md_report.append(f"- **[{h['level']}]** {h['text']}")
                     md_report.append("")

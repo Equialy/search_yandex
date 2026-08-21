@@ -98,13 +98,13 @@ class GenerateArticleUseCase:
                     company_name = parsed_target.get("title") or target_site
                     target_data_prompt = f"""
                     РЕАЛЬНЫЕ ДАННЫЕ И ПРАЙСЫ НАШЕГО САЙТА ({target_site}):
-                    Title нашего сайта: {parsed_target.get('title')}
-                    Description нашего сайта: {parsed_target.get('description')}
+                    
                     Настоящие тексты и цены с нашего сайта:
                     {parsed_target.get('body_text')}
                     """
 
-
+#Title нашего сайта: {parsed_target.get('title')}
+#Description нашего сайта: {parsed_target.get('description')}
             competitor_lengths = [
                 len(c.raw_text)
                 for c in (project.competitors or [])
