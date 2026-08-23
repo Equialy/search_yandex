@@ -159,3 +159,22 @@ def inject_multiple_images_to_article(
         offset += len(fig_html)
 
     return html_content
+
+
+def strip_existing_images(html: str) -> str:
+    """Удаляет ранее вставленные теги <figure> и <img> со статьи перед повторной вставкой."""
+    if not html:
+        return ""
+    cleaned = re.sub(
+        r'<figure[^>]*class="[^"]*seo-article__image-wrapper[^"]*"[^>]*>.*?</figure>',
+        '',
+        html,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+    cleaned = re.sub(
+        r'<img[^>]*class="[^"]*seo-article__img[^"]*"[^>]*>',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    return cleaned

@@ -428,3 +428,30 @@ GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE = """
   }}
 ]
 """
+
+
+REGENERATE_IMAGES_PROMPT_TEMPLATE = """
+Ты — арт-директор. Пользователь запросил перегенерацию или изменение изображений для статьи.
+
+ТЕМА СТАТЬИ: "{topic}"
+ТЕКСТ ЗАПРОСА ПОЛЬЗОВАТЕЛЯ: "{user_prompt}"
+
+Придумай 2-3 новых концепта фотографий/иллюстраций с учетом пожеланий пользователя.
+Требования:
+- Стиль: коммерческая реалистичная фотография высокого качества (4K, photorealistic commercial photography, clean studio/office lighting).
+- Без текста, надписей и водяных знаков (No text, no letters, no words).
+
+Верни СТРОГО валидный JSON-список без markdown обёрток:
+[
+  {{
+    "alt": "SEO-описание первого изображения на русском",
+    "caption": "Подпись к первому фото",
+    "prompt": "Detailed English prompt for image generation model..."
+  }},
+  {{
+    "alt": "SEO-описание второго изображения на русском",
+    "caption": "Подпись ко второму фото",
+    "prompt": "Detailed English prompt for second image..."
+  }}
+]
+"""
