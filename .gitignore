@@ -171,3 +171,5 @@ cython_debug/
 /exports
 pgadmin-data
 postgres-data
+
+/static/images

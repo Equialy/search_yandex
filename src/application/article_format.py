@@ -92,3 +92,70 @@ def inject_image_to_article(
         return html_content.replace("</p>", f"</p>\n{image_tag}", 1)
 
     return f"{image_tag}\n{html_content}"
+
+
+# src/application/article_format.py
+
+import re
+
+def inject_multiple_images_to_article(
+    html_content: str,
+    images: list[dict[str, str]],  # [{"url": "...", "alt": "...", "caption": "..."}]
+) -> str:
+    """
+    Распределяет список изображений по всей статье:
+    - 1-е изображение: после заголовка H1 (Hero-баннер)
+    - Последующие изображения: равномерно после заголовков H2
+    """
+    if not html_content or not images:
+        return html_content
+
+    # 1. Добавляем стили для адаптивных картинок
+    image_css = """
+  .seo-article__image-wrapper { margin: 28px 0; text-align: center; }
+  .seo-article__img { width: 100%; max-height: 480px; object-fit: cover; border-radius: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+  .seo-article__image-wrapper figcaption { font-size: 0.85em; color: #64748b; margin-top: 8px; font-style: italic; }
+"""
+    if "</style>" in html_content:
+        html_content = html_content.replace("</style>", f"{image_css}</style>", 1)
+
+    def make_figure(img_item: dict[str, str]) -> str:
+        caption = img_item.get("caption")
+        caption_html = f"<figcaption>{caption}</figcaption>" if caption else ""
+        return (
+            f'\n  <figure class="seo-article__image-wrapper">\n'
+            f'    <img src="{img_item["url"]}" alt="{img_item.get("alt", "")}" class="seo-article__img" loading="lazy" />\n'
+            f'    {caption_html}\n'
+            f'  </figure>\n'
+        )
+
+    # 2. Вставляем 1-ю картинку после H1
+    if images and "</h1>" in html_content:
+        hero_figure = make_figure(images[0])
+        html_content = html_content.replace("</h1>", f"</h1>\n{hero_figure}", 1)
+        remaining_images = images[1:]
+    else:
+        remaining_images = images
+
+    if not remaining_images:
+        return html_content
+
+    # 3. Распределяем оставшиеся картинки после H2 тегов
+    h2_matches = list(re.finditer(r"</h2>", html_content, flags=re.IGNORECASE))
+    if not h2_matches:
+        return html_content
+
+    # Если H2 блоков несколько, вставляем с шагом (например, после 2-го и 4-го H2)
+    step = max(1, len(h2_matches) // (len(remaining_images) + 1))
+    offset = 0
+
+    for i, img_data in enumerate(remaining_images, start=1):
+        target_idx = min(i * step, len(h2_matches) - 1)
+        match = h2_matches[target_idx]
+        pos = match.end() + offset
+
+        fig_html = make_figure(img_data)
+        html_content = html_content[:pos] + fig_html + html_content[pos:]
+        offset += len(fig_html)
+
+    return html_content
