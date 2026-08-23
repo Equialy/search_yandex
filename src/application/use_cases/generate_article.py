@@ -1,3 +1,5 @@
+# src/application/use_cases/generate_article.py
+
 import json
 import uuid
 from dataclasses import dataclass
@@ -6,13 +8,18 @@ from pathlib import Path
 from typing import Any
 from sqlalchemy.orm.attributes import flag_modified
 
-from src.application.prompts import ARTICLE_HTML_FORMAT_TEXT, SEO_GENERATE_ARTICLE
-from src.application.article_format import normalize_article_html
+from src.application.prompts import (
+    ARTICLE_HTML_FORMAT_TEXT,
+    SEO_GENERATE_ARTICLE,
+    GENERATE_IMAGE_PROMPT_TEMPLATE,
+)
+from src.application.article_format import normalize_article_html, inject_image_to_article
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import Article
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
+from src.infrastructure.gateways.image_gateway import ImageGenerationGateway
 
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -33,6 +40,7 @@ class GenerateArticleResult:
     article: Article
     target_site: str | None
     target_site_parse: dict[str, Any] | None
+    image_url: str | None = None
 
 
 def save_article_to_html(article: Article) -> Path:
@@ -43,34 +51,18 @@ def save_article_to_html(article: Article) -> Path:
     return file_path
 
 
-def save_article_to_txt(article: Article) -> Path:
-    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    data = {
-        "id": str(article.id),
-        "projectId": str(article.project_id),
-        "title": article.title,
-        "content": article.content,
-        "reasoning": article.reasoning,
-        "createdAt": article.created_at.isoformat() if article.created_at else datetime.now(timezone.utc).isoformat(),
-    }
-
-    file_path = EXPORTS_ARTICLES_DIR / f"article_{now_str}_{article.id}.txt"
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-    return file_path
-
-
 class GenerateArticleUseCase:
     def __init__(
             self,
             uow: UnitOfWorkProtocol,
             ai_gateway: OpenAiGateway,
-            parser_gateway: SiteParserGateway
+            parser_gateway: SiteParserGateway,
+            image_gateway: ImageGenerationGateway,  # <-- Добавили ImageGateway
     ):
         self._uow = uow
         self._kie = ai_gateway
         self._parser = parser_gateway
+        self._image_gateway = image_gateway
 
     async def execute(
             self,
@@ -103,8 +95,6 @@ class GenerateArticleUseCase:
                     {parsed_target.get('body_text')}
                     """
 
-#Title нашего сайта: {parsed_target.get('title')}
-#Description нашего сайта: {parsed_target.get('description')}
             competitor_lengths = [
                 len(c.raw_text)
                 for c in (project.competitors or [])
@@ -131,7 +121,6 @@ class GenerateArticleUseCase:
             prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
 
                     {target_data_prompt}
-
                     {volume_instruction}
 
                     СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
@@ -149,6 +138,29 @@ class GenerateArticleUseCase:
             )
 
             content = normalize_article_html(content)
+
+            image_relative_url = None
+            try:
+                img_prompt_request = GENERATE_IMAGE_PROMPT_TEMPLATE.format(
+                    topic=topic,
+                    company_name=company_name
+                )
+                image_prompt = await self._kie.generate_completion(
+                    [{"role": "user", "content": img_prompt_request}]
+                )
+
+                image_relative_url = await self._image_gateway.generate_and_save_image(
+                    prompt=image_prompt.strip(),
+                    filename_prefix=f"proj_{project.id.hex[:6]}"
+                )
+
+                content = inject_image_to_article(
+                    html_content=content,
+                    image_url=image_relative_url,
+                    alt_text=f"{topic} - {company_name}",
+                )
+            except Exception as img_err:
+                print(f" [Image Generation Warning]: Не удалось сгенерировать изображение: {img_err}")
 
             project.chat_history = updated_history
             flag_modified(project, "chat_history")
@@ -168,4 +180,5 @@ class GenerateArticleUseCase:
                 article=article,
                 target_site=target_site or None,
                 target_site_parse=target_site_parse,
+                image_url=image_relative_url,
             )

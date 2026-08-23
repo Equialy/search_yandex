@@ -54,3 +54,41 @@ def merge_style_with_markup(response_html: str, article_markup: str) -> str:
     if style_match:
         return f"{style_match.group(0)}\n{markup}"
     return response
+
+
+def inject_image_to_article(
+        html_content: str,
+        image_url: str,
+        alt_text: str,
+        caption: str | None = None
+) -> str:
+    """
+    Вставляет баннер/изображение сразу после h1 или первого абзаца статьи.
+    Также добавляет CSS-стили для .seo-article__image, если их нет.
+    """
+    if not html_content or not image_url:
+        return html_content
+
+    caption_html = f"<figcaption>{caption}</figcaption>" if caption else ""
+    image_tag = (
+        f'\n  <figure class="seo-article__image-wrapper">\n'
+        f'    <img src="{image_url}" alt="{alt_text}" class="seo-article__img" loading="lazy" />\n'
+        f'    {caption_html}\n'
+        f'  </figure>\n'
+    )
+
+    image_css = (
+        "\n  .seo-article__image-wrapper { margin: 24px 0; text-align: center; }\n"
+        "  .seo-article__img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }\n"
+        "  .seo-article__image-wrapper figcaption { font-size: 0.85em; color: #666; margin-top: 8px; }\n"
+    )
+
+    if "</style>" in html_content:
+        html_content = html_content.replace("</style>", f"{image_css}</style>", 1)
+
+    if "</h1>" in html_content:
+        return html_content.replace("</h1>", f"</h1>\n{image_tag}", 1)
+    elif "</p>" in html_content:
+        return html_content.replace("</p>", f"</p>\n{image_tag}", 1)
+
+    return f"{image_tag}\n{html_content}"

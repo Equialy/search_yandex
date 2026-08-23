@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
     # Очистка ресурсов при выключении сервера
     await app.state.http_client.aclose()
 
+# src/bootstrap.py
 
 def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(auth_router)
@@ -48,6 +49,10 @@ def apply_routes(app: FastAPI) -> FastAPI:
 
     app.mount("/mcp", mount_mcp())
 
+    static_dir = BASE_DIR / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
     if DIST_DIR.is_dir():
         assets_dir = DIST_DIR / "assets"
         if assets_dir.is_dir():
@@ -57,7 +62,7 @@ def apply_routes(app: FastAPI) -> FastAPI:
         if index_file.is_file():
             @app.get("/{full_path:path}", include_in_schema=False)
             async def spa_fallback(full_path: str):
-                if full_path in ("api", "v1") or full_path.startswith(("api/", "v1/")):
+                if full_path in ("api", "v1", "static") or full_path.startswith(("api/", "v1/", "static/")):
                     raise HTTPException(status_code=404, detail="Not found")
 
                 if any(part.startswith('.') for part in full_path.split('/')):
