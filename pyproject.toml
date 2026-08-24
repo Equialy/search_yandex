@@ -21,4 +21,7 @@ dependencies = [
     "pyjwt>=2.13.0",
     "pymorphy3>=2.0.6",
     "sqlalchemy>=2.0.51",
+    "taskiq>=0.12.5",
+    "taskiq-aio-pika>=0.6.0",
+    "taskiq-redis>=1.2.3",
 ]

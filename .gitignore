@@ -173,3 +173,4 @@ pgadmin-data
 postgres-data
 
 /static/images
+tree.py

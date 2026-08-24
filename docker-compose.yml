@@ -1,27 +1,77 @@
 services:
 
-
-
-
   backend:
     build: .
-    container_name: search_yandex
+    container_name: search_yandex_backend
     env_file:
       - .env
     environment:
+      RABBITMQ__HOST: rabbitmq
       DB__PG__HOST: postgres
-      DB__PG__PORT: 5432
+      DB__PG__PORT: "5432"
+      REDIS__HOST: redis
+      REDIS__PORT: "6379"
     ports:
       - "${APP_PORT:-8000}:8000"
+    volumes:
+      - static-data:/app/static
+      - exports-data:/app/exports
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    restart: "unless-stopped"
     networks:
       - app_network
-    restart: unless-stopped
 
+  worker:
+    build: .
+    container_name: search_yandex_worker
+    command: taskiq worker src.infrastructure.tasks.worker:broker --workers 2
+    env_file:
+      - .env
+    environment:
+      RABBITMQ__HOST: rabbitmq
+      DB__PG__HOST: postgres
+      DB__PG__PORT: "5432"
+      REDIS__HOST: redis
+      REDIS__PORT: "6379"
+    volumes:
+      - static-data:/app/static
+      - exports-data:/app/exports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    restart: "unless-stopped"
+    networks:
+      - app_network
 
-
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq_search_yandex
+    restart: "unless-stopped"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ__USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ__PASSWORD}
+    ports:
+      - "${RABBITMQ__PORT:-5672}:5672"
+      - "${RABBITMQ__UI_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
 
   postgres:
     image: postgres:18.1
@@ -34,7 +84,6 @@ services:
       POSTGRES_PASSWORD: ${DB__PG__PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/18/docker
-
     ports:
       - "${DB__PG__PORT}:5432"
     restart: "unless-stopped"
@@ -52,12 +101,24 @@ services:
     networks:
       - app_network
 
-
+  redis:
+    image: redis:7-alpine
+    container_name: redis_search_yandex
+    restart: always
+    ports:
+      - "${REDIS__PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - app_network
 
 networks:
   app_network:
     name: app_network
 
-
 volumes:
   postgres-data:
+  redis-data:
+  rabbitmq-data:
+  static-data:
+  exports-data:

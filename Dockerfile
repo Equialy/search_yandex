@@ -19,3 +19,4 @@ RUN mkdir -p /app/logs /app/exports/analysis /app/exports/articles /app/dist && 
 EXPOSE 8000
 
 ENTRYPOINT ["sh", "/app/docker-build/entrypoint.sh"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

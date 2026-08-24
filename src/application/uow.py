@@ -1,6 +1,7 @@
 from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.tasks.repository import TaskRepository
 from src.application.services.competitors.repositories import ProjectRepository, CompetitorRepository, \
     ArticleRepository, AgentChatRepository
 from src.application.services.users.repository import UserRepository
@@ -11,6 +12,7 @@ class UnitOfWorkProtocol(Protocol):
     competitors: CompetitorRepository
     articles: ArticleRepository
     agent_chats: AgentChatRepository
+    tasks: TaskRepository
 
     users: UserRepository
 
@@ -28,6 +30,7 @@ class UnitOfWork(UnitOfWorkProtocol):
         self.articles = ArticleRepository(session)
         self.agent_chats = AgentChatRepository(session=session)
         self.users = UserRepository(session=session)
+        self.tasks = TaskRepository(session)
 
 
     async def __aenter__(self):
