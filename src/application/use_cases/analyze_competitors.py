@@ -5,44 +5,17 @@ from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
 from src.application.prompts import ANALYZE_CONCURENTS
-from src.application.prompts import SEO_GUIDELINE_TEXT
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import CompetitorData, Project
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
+from src.api.v1.text_router.service import TextAiService
+from src.api.v1.text_router.schema import CalculateNauseaRequest
 
 EXPORTS_DIR = BASE_DIR / "exports" / "analysis"
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def save_analysis_to_txt(project_id: uuid.UUID, keyword: str, competitors: list[CompetitorData]) -> Path:
-    export_payload = {
-        "projectId": str(project_id),
-        "keyword": keyword,
-        "exportedAt": datetime.now(timezone.utc).isoformat(),
-        "competitorsCount": len(competitors),
-        "competitors": [
-            {
-                "id": str(c.id),
-                "url": c.url,
-                "title": c.title,
-                "seoMeta": c.graph_data,
-                "summary": c.summary,
-                "createdAt": c.created_at.isoformat() if c.created_at else None,
-            }
-            for c in competitors
-        ]
-    }
-
-    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    file_path = EXPORTS_DIR / f"analysis_{now_str}_{project_id}.txt"
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(export_payload, f, ensure_ascii=False, indent=2)
-
-    return file_path
 
 
 class AnalyzeCompetitorsUseCase:
@@ -51,12 +24,14 @@ class AnalyzeCompetitorsUseCase:
             uow: UnitOfWorkProtocol,
             yandex_gateway: YandexSearchGateway,
             parser_gateway: SiteParserGateway,
-            ai_gateway: OpenAiGateway
+            ai_gateway: OpenAiGateway,
+            text_ai_service: TextAiService,
     ):
         self._uow = uow
         self._yandex = yandex_gateway
         self._parser = parser_gateway
         self._kie = ai_gateway
+        self._text_ai = text_ai_service
 
     async def execute(
             self,
@@ -86,12 +61,11 @@ class AnalyzeCompetitorsUseCase:
                         "content": f"""Ты — главный коммерческий SEO-копирайтер и эксперт по анализу конкурентов.
                         Твоя задача — накапливать выжимки сайтов конкурентов и сайта пользователя и проанализировать 
                         конкурентов для дальнейшей генерации статьи моего сайта:
-                        
+
                         {ANALYZE_CONCURENTS}
                         """
                     }
                 ]
-                # {SEO_GUIDELINE_TEXT}
 
                 project = Project(
                     user_id=user_id,
@@ -131,6 +105,29 @@ class AnalyzeCompetitorsUseCase:
 
                 site_title = parsed_site.get("title") or yandex_title or site_url
                 site_desc = parsed_site.get("description") or yandex_desc or ""
+                clean_content = parsed_site.get("clean_text") or parsed_site.get("body_text", "")
+
+                comp_seo_metrics = {}
+                try:
+                    nausea_res = self._text_ai.calculate_nausea(
+                        CalculateNauseaRequest(text=clean_content)
+                    )
+                    detect_res = await self._text_ai.detect_ai(clean_content)
+
+                    comp_seo_metrics = {
+                        "classicNausea": nausea_res.classic_nausea,
+                        "academicNausea": nausea_res.academic_nausea,
+                        "totalWords": nausea_res.total_words,
+                        "uniqueWords": nausea_res.unique_words,
+                        "charCount": len(clean_content),
+                        "charCountNoSpaces": len(clean_content.replace(" ", "")),
+                        "topWords": [w.model_dump(by_alias=True) for w in nausea_res.top_words],
+                        "aiPercentage": detect_res.ai_percentage,
+                        "humanPercentage": detect_res.human_percentage,
+                        "aiReason": detect_res.reason,
+                    }
+                except Exception as e:
+                    print(f"⚠️ [Competitor SEO Metrics Error for {site_url}]: {e}")
 
                 competitor = CompetitorData(
                     project_id=project.id,
@@ -142,7 +139,8 @@ class AnalyzeCompetitorsUseCase:
                         "body_text": parsed_site.get("body_text")
                     },
                     raw_text=parsed_site.get("body_text"),
-                    summary=summary
+                    summary=summary,
+                    seo_metrics=comp_seo_metrics,
                 )
                 await uow.competitors.add(competitor)
                 created_competitors.append(competitor)
@@ -155,7 +153,8 @@ class AnalyzeCompetitorsUseCase:
 
             if summaries:
                 label = f"по ключу '{keyword}'" if keyword else f"по прямому URL {url}"
-                context_prompt = f"Дополнительный глубокий анализ конкурентов {label}:\n\n" + "\n\n---\n\n".join(summaries)
+                context_prompt = f"Дополнительный глубокий анализ конкурентов {label}:\n\n" + "\n\n---\n\n".join(
+                    summaries)
 
                 history = list(project.chat_history)
                 history.append({"role": "user", "content": context_prompt})
@@ -169,12 +168,5 @@ class AnalyzeCompetitorsUseCase:
 
             all_project_competitors = await uow.competitors.get_by_project_id(project.id)
             all_urls = [c.url for c in all_project_competitors]
-
-            saved_file_path = save_analysis_to_txt(
-                project_id=project.id,
-                keyword=project.keyword,
-                competitors=all_project_competitors
-            )
-            print(f"💾 [Analysis Saved to File]: {saved_file_path}\n")
 
         return project.id, all_urls, all_project_competitors

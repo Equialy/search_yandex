@@ -67,6 +67,12 @@ class CompetitorData(Base):
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text)
 
+    seo_metrics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        server_default="{}"
+    )
+
 
     project: Mapped["Project"] = relationship("Project", back_populates="competitors")
 

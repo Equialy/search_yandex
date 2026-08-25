@@ -96,6 +96,7 @@ class CompetitorDetailDTO(BaseDTO):
     graph_data: Any = None
     raw_text: str | None = None
     summary: str | None = None
+    seo_metrics: SeoMetricsDTO | None = None
 
 
 class ProjectAnalysisResponse(BaseDTO):
