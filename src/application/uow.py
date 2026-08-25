@@ -41,7 +41,7 @@ class UnitOfWork(UnitOfWorkProtocol):
             await self.rollback()
         else:
             await self.commit()
-        await self.session.close()
+        # await self.session.close()
 
     async def commit(self):
         await self.session.commit()

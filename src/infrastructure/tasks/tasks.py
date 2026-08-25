@@ -26,16 +26,9 @@ async def generate_full_article_pipeline_task(
     analyze_uc: FromDishka[AnalyzeCompetitorsUseCase] = None,
     generate_uc: FromDishka[GenerateArticleUseCase] = None,
 ):
-    """
-    Фоновый пайплайн полного цикла:
-    1. Поиск и LSA-анализ конкурентов в Яндекс.
-    2. Парсинг сайта компании и расчет оптимального объема.
-    3. Генерация коммерческой SEO-статьи.
-    4. Параллельная генерация и интеграция иллюстраций.
-    """
     logger.info(
-        "[Pipeline Task] ▶ START | task_id=%s | user_id=%s | keyword='%s' | target_site=%s",
-        task_id_str, user_id_str, keyword, target_site
+        "[Pipeline Task] ▶ START | task_id=%s | user_id=%s | keyword='%s'",
+        task_id_str, user_id_str, keyword
     )
 
     task_id = UUID(task_id_str)
@@ -43,57 +36,63 @@ async def generate_full_article_pipeline_task(
     existing_project_id = UUID(project_id_str) if project_id_str else None
     final_topic = topic.strip() if topic and topic.strip() else keyword
 
-    async with uow:
-        task = await uow.tasks.get_by_id(task_id)
-        if not task:
-            logger.error("[Pipeline Task] Task not found in DB | task_id=%s", task_id)
-            return
-
-        try:
+    try:
+        async with uow:
+            task = await uow.tasks.get_by_id(task_id)
+            if not task:
+                logger.error("[Pipeline Task] Task not found in DB | task_id=%s", task_id)
+                return
             task.status = TaskStatus.PROCESSING
             task.progress_message = "Поиск и глубокий LSA-анализ конкурентов в Яндекс..."
             await uow.commit()
 
-            logger.info("[Pipeline Task] [1/3] Запуск анализа конкурентов в выдаче Яндекс...")
-            project_id, found_urls, competitors = await analyze_uc.execute(
-                user_id=user_id,
-                keyword=keyword,
-                limit=sites_limit,
-                project_id=existing_project_id,
-            )
-            logger.info(
-                "[Pipeline Task] [1/3] Анализ завершен | project_id=%s | competitors_found=%d",
-                project_id, len(competitors)
-            )
+        logger.info("[Pipeline Task] [1/3] Запуск анализа конкурентов в Яндекс...")
+        project_id, found_urls, competitors = await analyze_uc.execute(
+            user_id=user_id,
+            keyword=keyword,
+            limit=sites_limit,
+            project_id=existing_project_id,
+        )
+        logger.info(
+            "[Pipeline Task] [1/3] Анализ завершен | project_id=%s | competitors=%d",
+            project_id, len(competitors)
+        )
 
+        async with uow:
+            task = await uow.tasks.get_by_id(task_id)
             task.project_id = project_id
             task.progress_message = "Генерация текста статьи и параллельное создание иллюстраций..."
             await uow.commit()
 
-            logger.info("[Pipeline Task] [2/3] Запуск генерации статьи (тема: '%s')...", final_topic)
-            gen_result = await generate_uc.execute(
-                project_id=project_id,
-                topic=final_topic,
-                instructions=instructions or "",
-                target_site=target_site or "",
-                user_id=user_id,
-            )
-            logger.info(
-                "[Pipeline Task]  [2/3] Статья успешно создана | article_id=%s | images_count=%d",
-                gen_result.article.id,
-                len(gen_result.images_urls or [])
-            )
+        logger.info("[Pipeline Task]  [2/3] Запуск генерации статьи (тема: '%s')...", final_topic)
+        gen_result = await generate_uc.execute(
+            project_id=project_id,
+            topic=final_topic,
+            instructions=instructions or "",
+            target_site=target_site or "",
+            user_id=user_id,
+        )
+        logger.info(
+            "[Pipeline Task] ✅ [2/3] Статья создана | article_id=%s",
+            gen_result.article.id
+        )
 
+        async with uow:
+            task = await uow.tasks.get_by_id(task_id)
             task.article_id = gen_result.article.id
+            task.project_id = project_id
             task.status = TaskStatus.COMPLETED
             task.progress_message = "Статья и изображения успешно созданы!"
             await uow.commit()
 
-            logger.info("[Pipeline Task]  FINISHED SUCCESS | task_id=%s | project_id=%s", task_id, project_id)
+        logger.info("[Pipeline Task] FINISHED SUCCESS | task_id=%s | project_id=%s", task_id, project_id)
 
-        except Exception as e:
-            logger.exception("[Pipeline Task]  FAILED | task_id=%s | error=%s", task_id, e)
-            task.status = TaskStatus.FAILED
-            task.error_message = str(e)
-            task.progress_message = f"Ошибка: {str(e)}"
-            await uow.commit()
+    except Exception as e:
+        logger.exception("[Pipeline Task] FAILED | task_id=%s | error=%s", task_id, e)
+        async with uow:
+            task = await uow.tasks.get_by_id(task_id)
+            if task:
+                task.status = TaskStatus.FAILED
+                task.error_message = str(e)
+                task.progress_message = f"Ошибка: {str(e)}"
+                await uow.commit()
