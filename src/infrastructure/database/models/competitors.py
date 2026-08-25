@@ -97,6 +97,11 @@ class Article(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    seo_metrics: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        server_default="{}"
+    )
 
     project: Mapped["Project"] = relationship("Project", back_populates="articles")
 

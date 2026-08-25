@@ -93,6 +93,7 @@ async def generate_article(
             created_at=article.created_at,
             target_site=result.target_site,
             target_site_parse=parse_dto,
+            seo_metrics=article.seo_metrics,
         )
     except ValueError as e:
         if "Проект не найден" in str(e):
@@ -202,6 +203,7 @@ async def get_project(
                 reasoning=article.reasoning,
                 created_at=article.created_at,
                 content_preview=preview,
+                seo_metrics=article.seo_metrics,
             ))
             generation_history.append(schemas.ArticleHistoryItemDTO(
                 id=article.id,
@@ -210,6 +212,7 @@ async def get_project(
                 reasoning=article.reasoning,
                 created_at=article.created_at,
                 content=article.content,
+                seo_metrics=article.seo_metrics,
             ))
 
         chat_history = [
@@ -218,9 +221,9 @@ async def get_project(
         ]
 
         fallback_article = articles[0] if articles else None
-        latest_article_content = get_latest_article_html(
-            project.chat_history,
-            fallback_article.content if fallback_article else None,
+        latest_article_content = (
+            fallback_article.content if fallback_article
+            else get_latest_article_html(project.chat_history)
         )
         latest_article_title = fallback_article.title if fallback_article else project.keyword
 

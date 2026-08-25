@@ -56,6 +56,15 @@ class ChatHistoryMessageDTO(BaseDTO):
     html_content: str | None = None
     article_version: int | None = None
 
+class SeoMetricsDTO(BaseDTO):
+    classic_nausea: float | None = None
+    academic_nausea: float | None = None
+    total_words: int | None = None
+    unique_words: int | None = None
+    ai_percentage: int | None = None
+    human_percentage: int | None = None
+    ai_reason: str | None = None
+    top_words: list[Any] = Field(default_factory=list)
 
 class ArticleHistoryItemDTO(BaseDTO):
     id: uuid.UUID
@@ -64,6 +73,7 @@ class ArticleHistoryItemDTO(BaseDTO):
     reasoning: str | None = None
     created_at: datetime
     content: str
+    seo_metrics: SeoMetricsDTO | None = None
 
 
 class ArticleResponse(BaseDTO):
@@ -76,6 +86,7 @@ class ArticleResponse(BaseDTO):
     target_site: str | None = None
     target_site_parse: TargetSiteParseDTO | None = None
     content_preview: str | None = None
+    seo_metrics: SeoMetricsDTO | None = None
 
 
 class CompetitorDetailDTO(BaseDTO):
