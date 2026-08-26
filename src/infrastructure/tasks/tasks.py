@@ -2,13 +2,19 @@ import logging
 from uuid import UUID
 from dishka.integrations.taskiq import FromDishka, inject
 
+from src.api.v1.reports_api.schemas import SendArticleReportPayload
+from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.tasks.broker import broker
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.tasks import TaskStatus
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
+from src.utils.extract_data import extract_html_metadata
 
 logger = logging.getLogger(__name__)
+
+
+
 
 
 @broker.task(task_name="generate_full_article_pipeline")
@@ -73,7 +79,7 @@ async def generate_full_article_pipeline_task(
             user_id=user_id,
         )
         logger.info(
-            "[Pipeline Task] ✅ [2/3] Статья создана | article_id=%s",
+            "[Pipeline Task] [2/3] Статья создана | article_id=%s",
             gen_result.article.id
         )
 
@@ -96,3 +102,101 @@ async def generate_full_article_pipeline_task(
                 task.error_message = str(e)
                 task.progress_message = f"Ошибка: {str(e)}"
                 await uow.commit()
+
+
+
+
+
+@broker.task(task_name="generate_reports_article_pipeline")
+@inject
+async def generate_reports_article_pipeline_task(
+    id_task: int,
+    user_id_str: str,
+    site_key: str,
+    domain: str,
+    instructions: str = "",
+    sites_limit: int = 3,
+    topic: str | None = None,
+    uow: FromDishka[UnitOfWorkProtocol] = None,
+    analyze_uc: FromDishka[AnalyzeCompetitorsUseCase] = None,
+    generate_uc: FromDishka[GenerateArticleUseCase] = None,
+    reports_gateway: FromDishka[ReportsArticleGateway] = None,
+):
+    """
+    Фоновый пайплайн для внешней системы Reports:
+    1. Поиск конкурентов и сбор метрик.
+    2. Генерация статьи под ключ.
+    3. Форматирование мета-метрик и отправка POST-запроса в Report.
+    """
+    logger.info(
+        "[Reports Task] ▶ START | id_task=%d | site_key='%s' | domain='%s'",
+        id_task, site_key, domain
+    )
+    user_id = UUID(user_id_str)
+    final_topic = topic.strip() if topic and topic.strip() else site_key
+    target_site = domain.strip()
+    if target_site and not target_site.startswith(("http://", "https://")):
+        target_site = f"https://{target_site}"
+
+    try:
+        # 1. Анализ конкурентов
+        logger.info("[Reports Task]  [1/3] Поиск конкурентов по ключу '%s'...", site_key)
+        project_id, _, competitors = await analyze_uc.execute(
+            user_id=user_id,
+            keyword=site_key,
+            limit=sites_limit,
+        )
+
+        # 2. Формирование строки метрик конкурентов (concurent_metrix)
+        concurent_lines = []
+        for c in competitors:
+            metrics = c.seo_metrics or {}
+            char_count = metrics.get("charCount") or len(c.raw_text or "")
+            nausea = int(metrics.get("academicNausea") or 0)
+            human = int(metrics.get("humanPercentage") or 80)
+            clean_url = c.url.replace("https://", "").replace("http://", "")
+            concurent_lines.append(
+                f"https://{clean_url} | количество символов: {char_count} | Тошнота текста: {nausea}% | Очеловечивание: {human}%"
+            )
+        concurent_metrix = "\n".join(concurent_lines)
+
+        # 3. Генерация статьи
+        logger.info("[Reports Task]  [2/3] Генерация статьи для '%s'...", target_site)
+        gen_result = await generate_uc.execute(
+            project_id=project_id,
+            topic=final_topic,
+            instructions=instructions or "",
+            target_site=target_site,
+            user_id=user_id,
+        )
+
+        article = gen_result.article
+        h1_val, title_val, desc_val = extract_html_metadata(article.content, final_topic)
+
+        metrics = article.seo_metrics or {}
+        char_count = int(metrics.get("charCount") or len(article.content))
+        toshnota = int(metrics.get("academicNausea") or 8)
+        human = int(metrics.get("humanPercentage") or 85)
+
+        # 4. Отправка отчета обратно в Reports API
+        logger.info("[Reports Task] [3/3] Отправка статьи в Reports API (id_task=%d)...", id_task)
+        report_payload = SendArticleReportPayload(
+            id_task=id_task,
+            content=article.content,
+            text_title=title_val,
+            text_description=desc_val,
+            text_H1=h1_val,
+            text_count_char=char_count,
+            text_toshnota=toshnota,
+            text_human=human,
+            concurent_metrix=concurent_metrix,
+        )
+
+        response_report = await reports_gateway.send_article(report_payload)
+        logger.info(
+            "[Reports Task] FINISHED SUCCESS | id_task=%d | message=%s",
+            id_task, response_report.message
+        )
+
+    except Exception as e:
+        logger.exception("[Reports Task] FAILED | id_task=%d | error=%s", id_task, e)

@@ -58,6 +58,9 @@ class RabbitMQ(BaseModel):
         return f"amqp://{self.USER}:{self.PASSWORD}@{self.HOST}:{self.PORT}/"
 
 
+class ReportsArticle(BaseModel):
+    SECRET_KEY: str
+
 class JwtSettings(BaseModel):
     secret_key: str
     algorithm: str = "HS256"
@@ -111,6 +114,7 @@ class Settings(BaseSettings):
     YANDEX_FOLDER_ID: str
     OPENAI: OpenAI
     proxy: Proxy
+    reports: ReportsArticle
     # sqla: SQLAlchemy
 
     model_config = SettingsConfigDict(

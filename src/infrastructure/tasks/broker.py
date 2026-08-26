@@ -20,5 +20,6 @@ result_backend = RedisAsyncResultBackend(
 
 broker = AioPikaBroker(
     url=settings.rabbitmq.url,
+    queue_name="seo_article_queue",
     qos=1,
 ).with_result_backend(result_backend)
