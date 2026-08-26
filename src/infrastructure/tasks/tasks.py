@@ -106,7 +106,6 @@ async def generate_full_article_pipeline_task(
 
 
 
-
 @broker.task(task_name="generate_reports_article_pipeline")
 @inject
 async def generate_reports_article_pipeline_task(
@@ -115,19 +114,15 @@ async def generate_reports_article_pipeline_task(
     site_key: str,
     domain: str,
     instructions: str = "",
-    sites_limit: int = 3,
+    sites_limit: int = 4,
     topic: str | None = None,
     uow: FromDishka[UnitOfWorkProtocol] = None,
     analyze_uc: FromDishka[AnalyzeCompetitorsUseCase] = None,
     generate_uc: FromDishka[GenerateArticleUseCase] = None,
     reports_gateway: FromDishka[ReportsArticleGateway] = None,
 ):
-    """
-    Фоновый пайплайн для внешней системы Reports:
-    1. Поиск конкурентов и сбор метрик.
-    2. Генерация статьи под ключ.
-    3. Форматирование мета-метрик и отправка POST-запроса в Report.
-    """
+    from src.application.services.reports_api.poller import _ACTIVE_TASKS
+
     logger.info(
         "[Reports Task] ▶ START | id_task=%d | site_key='%s' | domain='%s'",
         id_task, site_key, domain
@@ -139,15 +134,13 @@ async def generate_reports_article_pipeline_task(
         target_site = f"https://{target_site}"
 
     try:
-        # 1. Анализ конкурентов
-        logger.info("[Reports Task]  [1/3] Поиск конкурентов по ключу '%s'...", site_key)
+        logger.info("[Reports Task] [1/3] Поиск 4 конкурентов в Яндекс по ключу '%s'...", site_key)
         project_id, _, competitors = await analyze_uc.execute(
             user_id=user_id,
             keyword=site_key,
             limit=sites_limit,
         )
 
-        # 2. Формирование строки метрик конкурентов (concurent_metrix)
         concurent_lines = []
         for c in competitors:
             metrics = c.seo_metrics or {}
@@ -178,8 +171,7 @@ async def generate_reports_article_pipeline_task(
         toshnota = int(metrics.get("academicNausea") or 8)
         human = int(metrics.get("humanPercentage") or 85)
 
-        # 4. Отправка отчета обратно в Reports API
-        logger.info("[Reports Task] [3/3] Отправка статьи в Reports API (id_task=%d)...", id_task)
+        logger.info("[Reports Task]  [3/3] Отправка в Reports API (id_task=%d)...", id_task)
         report_payload = SendArticleReportPayload(
             id_task=id_task,
             content=article.content,
@@ -193,10 +185,9 @@ async def generate_reports_article_pipeline_task(
         )
 
         response_report = await reports_gateway.send_article(report_payload)
-        logger.info(
-            "[Reports Task] FINISHED SUCCESS | id_task=%d | message=%s",
-            id_task, response_report.message
-        )
+        logger.info("[Reports Task] УСПЕШНО ОТПРАВЛЕНО | id_task=%d | message=%s", id_task, response_report.message)
 
     except Exception as e:
-        logger.exception("[Reports Task] FAILED | id_task=%d | error=%s", id_task, e)
+        logger.exception(" [Reports Task] ОШИБКА | id_task=%d | error=%s", id_task, e)
+    finally:
+        _ACTIVE_TASKS.discard(id_task)

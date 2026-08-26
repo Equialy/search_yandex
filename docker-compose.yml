@@ -30,7 +30,7 @@ services:
   worker:
     build: .
     container_name: search_yandex_worker
-    command: taskiq worker src.infrastructure.tasks.worker:broker --workers 2
+    command: taskiq worker src.infrastructure.tasks.worker:broker --workers 3
     env_file:
       - .env
     environment:

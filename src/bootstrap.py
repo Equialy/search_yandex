@@ -1,9 +1,13 @@
+import asyncio
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from src.application.services.reports_api.poller import start_reports_polling_loop
+from src.infrastructure.database.engine import new_engine, new_session_maker
+from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.tasks.broker import broker
 from src.api.v1.agent.routers import router as agent_router
 from src.api.v1.competitors.routers import router as competitors_router
@@ -19,7 +23,7 @@ from src.application.mcp.proxy import set_mcp_app
 
 from src.api.v1.auth.routers import router as auth_router
 
-from src.config.settings import BASE_DIR
+from src.config.settings import BASE_DIR, settings
 
 DIST_DIR = BASE_DIR / "dist"
 
@@ -30,21 +34,32 @@ async def lifespan(app: FastAPI):
         await broker.startup()
 
     limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
-    timeout = httpx.Timeout(60.0)
-    app.state.http_client = httpx.AsyncClient(limits=limits, timeout=timeout)
+    app.state.http_client = httpx.AsyncClient(limits=limits, timeout=60.0)
+
+    engine = new_engine(settings.db)
+    session_maker = new_session_maker(engine)
+    reports_gateway = ReportsArticleGateway(app.state.http_client)
+
+    poller_task = asyncio.create_task(
+        start_reports_polling_loop(
+            gateway=reports_gateway,
+            session_maker=session_maker,
+            poll_interval_seconds=settings.reports.POOL_INTERVAL_SECONDS,
+        )
+    )
 
     set_mcp_app(app)
-
     mcp_app = mount_mcp()
 
     try:
         async with mcp_app.lifespan(app):
             yield
     finally:
+        poller_task.cancel()
+        await engine.dispose()
         await app.state.http_client.aclose()
         if not broker.is_worker_process:
             await broker.shutdown()
-
 
 def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(auth_router)

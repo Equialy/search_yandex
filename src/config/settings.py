@@ -60,6 +60,7 @@ class RabbitMQ(BaseModel):
 
 class ReportsArticle(BaseModel):
     SECRET_KEY: str
+    POOL_INTERVAL_SECONDS: int
 
 class JwtSettings(BaseModel):
     secret_key: str
