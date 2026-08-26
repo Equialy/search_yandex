@@ -3,6 +3,7 @@ from uuid import UUID
 from dishka.integrations.taskiq import FromDishka, inject
 
 from src.api.v1.reports_api.schemas import SendArticleReportPayload
+from src.config.settings import settings
 from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.tasks.broker import broker
 from src.application.uow import UnitOfWorkProtocol
@@ -170,11 +171,18 @@ async def generate_reports_article_pipeline_task(
         char_count = int(metrics.get("charCount") or len(article.content))
         toshnota = int(metrics.get("academicNausea") or 8)
         human = int(metrics.get("humanPercentage") or 85)
+        base_public_url = settings.base_url.rstrip("/")
+
+        public_html_content = (
+            article.content
+            .replace('src="/static/', f'src="{base_public_url}/static/')
+            .replace("src='/static/", f"src='{base_public_url}/static/")
+        )
 
         logger.info("[Reports Task]  [3/3] Отправка в Reports API (id_task=%d)...", id_task)
         report_payload = SendArticleReportPayload(
             id_task=id_task,
-            content=article.content,
+            content=public_html_content,
             text_title=title_val,
             text_description=desc_val,
             text_H1=h1_val,
