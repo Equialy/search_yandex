@@ -6,6 +6,7 @@ from src.infrastructure.gateways.image_gateway import ImageGenerationGateway
 from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.llm_gateway import LLMGateway
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway
+from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
 
@@ -39,5 +40,10 @@ class GatewaysProvider(Provider):
 
     openai_gateway = provide(
         OpenAiGateway,
+        scope=Scope.APP,
+    )
+
+    reports_gateway = provide(
+        ReportsArticleGateway,
         scope=Scope.APP,
     )
