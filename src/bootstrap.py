@@ -10,6 +10,7 @@ from src.api.v1.competitors.routers import router as competitors_router
 from src.api.v1.text_router.routers import router as text_router
 from src.application.mcp.router import router as mcp_connect_router
 from src.api.v1.tasks.routers import router as tasks_router
+from src.api.v1.reports_api.routers import router as reports_router
 
 # Импорты MCP для bootstrap
 from src.application.mcp.server import mount_mcp
@@ -52,6 +53,7 @@ def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(agent_router)
     app.include_router(mcp_connect_router)
     app.include_router(tasks_router)
+    app.include_router(reports_router)
 
     app.mount("/mcp", mount_mcp())
 
