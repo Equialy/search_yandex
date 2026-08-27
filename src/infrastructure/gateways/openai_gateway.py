@@ -223,3 +223,34 @@ class OpenAiGateway:
         """
         messages = [{"role": "user", "content": prompt}]
         return await self.generate_completion(messages, reasoning_effort="high")
+
+
+
+
+
+
+    async def extract_logo_from_html(self, html_snippet: str, base_url: str) -> str | None:
+            """Ищет URL логотипа в HTML-фрагменте через LLM."""
+            prompt = f"""Проанализируй этот HTML-фрагмент шапки сайта ({base_url}). 
+            Найди прямую ссылку (атрибут src у тега img) на **логотип компании**.
+        
+            Верни ТОЛЬКО абсолютный URL картинки логотипа (начинающийся с http:// или https://). 
+            Если картинок несколько, выбери ту, которая больше всего похожа на главный логотип в шапке.
+            Не пиши никаких пояснений, только саму ссылку. Если логотип не найден, напиши "NONE".
+        
+            HTML-фрагмент:
+            {html_snippet}
+            """
+            try:
+                response = await self._client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=200,
+                )
+                logo_url = response.choices[0].message.content.strip()
+                if logo_url and logo_url != "NONE" and logo_url.startswith("http"):
+                    return logo_url
+            except Exception as e:
+                print(f"[AI Logo Extraction Error]: {e}")
+            return None

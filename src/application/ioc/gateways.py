@@ -21,6 +21,10 @@ class GatewaysProvider(Provider):
     ) -> ImageGenerationGateway:
         return ImageGenerationGateway(openai_client=openai_client, http_client=http_client)
 
+    @provide(scope=Scope.APP)
+    def get_site_parser(self, http_client: httpx.AsyncClient, openai_gateway: OpenAiGateway) -> SiteParserGateway:
+        return SiteParserGateway(http_client=http_client, openai_gateway=openai_gateway)
+
     yandex_gateway = provide(
         YandexSearchGateway,
         scope=Scope.APP,

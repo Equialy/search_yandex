@@ -17,6 +17,7 @@ dependencies = [
     "networkx>=3.6.1",
     "openai>=2.53.0",
     "passlib[bcrypt]>=1.7.4",
+    "pillow>=12.3.0",
     "psycopg[binary]>=3.3.4",
     "pyjwt>=2.13.0",
     "pymorphy3>=2.0.6",

@@ -3,7 +3,9 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
+
+from src.utils.extract_data import _extract_logo_url
 
 try:
     from curl_cffi.requests import AsyncSession
@@ -41,29 +43,45 @@ def _prepare_content_root(soup: BeautifulSoup) -> Any:
 
     for tag_name in _NAV_CHROME_TAGS:
         for tag in content.find_all(tag_name):
-            tag.decompose()
+            if isinstance(tag, Tag):
+                tag.decompose()
 
-    for tag in content.find_all(attrs={"role": True}):
-        role = (tag.get("role") or "").lower()
+    for tag in content.find_all(True):
+        if not isinstance(tag, Tag) or not isinstance(tag.attrs, dict):
+            continue
+
+        role = str(tag.attrs.get("role", "")).lower()
         if role in _NAV_ROLES:
             tag.decompose()
+            continue
 
-    for tag in content.find_all(class_=_NAV_CLASS_PATTERN):
-        tag.decompose()
+        classes = tag.attrs.get("class", [])
+        if isinstance(classes, list):
+            class_str = " ".join(classes)
+        else:
+            class_str = str(classes)
 
-    for tag in content.find_all(id=_NAV_CLASS_PATTERN):
-        tag.decompose()
+        if class_str and _NAV_CLASS_PATTERN.search(class_str):
+            tag.decompose()
+            continue
+
+        tag_id = str(tag.attrs.get("id", ""))
+        if tag_id and _NAV_CLASS_PATTERN.search(tag_id):
+            tag.decompose()
+            continue
+
+    def _is_main_role(t: Any) -> bool:
+        return isinstance(t, Tag) and isinstance(t.attrs, dict) and t.attrs.get("role") == "main"
 
     main = (
-        content.find("main")
-        or content.find("article")
-        or content.find(attrs={"role": "main"})
+            content.find("main")
+            or content.find("article")
+            or content.find(_is_main_role)
     )
     return main or content.find("body") or content
 
-
 class SiteParserGateway:
-    def __init__(self, http_client: httpx.AsyncClient):
+    def __init__(self, http_client: httpx.AsyncClient ):
         self._client = http_client
 
     async def parse_site_to_graph(
@@ -85,12 +103,19 @@ class SiteParserGateway:
             if html_text:
                 soup = BeautifulSoup(html_text, "html.parser")
 
-                # 1. Title & Meta Description
-                title = soup.title.get_text(" ", strip=True) if soup.title else ""
+                logo_url = _extract_logo_url(soup, url)
+                print(f"[SiteParserGateway] Extracted logo for {url} -> {logo_url}")
+
+                title = ""
+                if soup.title and hasattr(soup.title, "get_text"):
+                    title = soup.title.get_text(" ", strip=True)
+
                 if not title:
                     og_title = soup.find("meta", attrs={"property": re.compile(r"og:title$", re.I)})
-                    if og_title and og_title.get("content"):
-                        title = og_title.get("content").strip()
+                    if isinstance(og_title, Tag):
+                        val = og_title.get("content")
+                        if val and isinstance(val, str):
+                            title = val.strip()
 
                 final_title = title or fallback_title or domain
 
@@ -100,27 +125,33 @@ class SiteParserGateway:
                     or soup.find("meta", attrs={"property": re.compile(r"description$", re.I)})
                     or soup.find("meta", attrs={"itemprop": re.compile(r"description$", re.I)})
                 )
-                if meta_tag and meta_tag.get("content"):
-                    meta_desc = meta_tag.get("content").strip()
+                if isinstance(meta_tag, Tag):
+                    val = meta_tag.get("content")
+                    if val and isinstance(val, str):
+                        meta_desc = val.strip()
 
                 final_desc = meta_desc or fallback_desc or ""
 
                 content_root = _prepare_content_root(soup)
 
-                # 2. Заголовки H1-H4
                 headings = []
                 for h in content_root.find_all(["h1", "h2", "h3", "h4"]):
-                    h_text = h.get_text(" ", strip=True)
-                    if h_text and len(h_text) > 3:
-                        headings.append({"level": h.name.upper(), "text": h_text})
+                    if isinstance(h, Tag):
+                        h_text = h.get_text(" ", strip=True)
+                        if h_text and len(h_text) > 3:
+                            headings.append({"level": h.name.upper(), "text": h_text})
 
-                # 3. Таблицы с правильной Markdown-разметкой
+                # 4. Таблицы с правильной Markdown-разметкой
                 tables_markdown = []
                 for table in content_root.find_all("table")[:6]:
+                    if not isinstance(table, Tag):
+                        continue
                     rows = []
                     header_cells_count = 0
                     for tr_idx, tr in enumerate(table.find_all("tr")[:20]):
-                        cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"])]
+                        if not isinstance(tr, Tag):
+                            continue
+                        cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"]) if isinstance(td, Tag)]
                         if cells and any(c for c in cells):
                             rows.append(" | ".join(cells))
                             if tr_idx == 0:
@@ -129,27 +160,28 @@ class SiteParserGateway:
                     if rows:
                         tables_markdown.append("\n".join(rows))
 
-                # 4. FAQ Аккордеоны
+                # 5. FAQ Аккордеоны
                 faq_blocks = []
                 for details in content_root.find_all(
                     ["details", "div"],
                     class_=re.compile(r"faq|accordion|question|reply|answer", re.I),
                 )[:6]:
-                    q_text = details.get_text(" ", strip=True)
-                    if len(q_text) > 20 and q_text not in faq_blocks:
-                        faq_blocks.append(q_text)
+                    if isinstance(details, Tag):
+                        q_text = details.get_text(" ", strip=True)
+                        if len(q_text) > 20 and q_text not in faq_blocks:
+                            faq_blocks.append(q_text)
 
-                # 5. Извлечение чистого текста по абзацам (без дублей и мусора)
+                # 6. Извлечение чистого текста по абзацам
                 paragraphs = []
                 for elem in content_root.find_all(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "span"]):
-                    text = elem.get_text(" ", strip=True)
-                    if len(text) > 25 and not _GARBAGE_TEXT_PATTERN.match(text):
-                        if not paragraphs or paragraphs[-1] != text:
-                            paragraphs.append(text)
+                    if isinstance(elem, Tag):
+                        text = elem.get_text(" ", strip=True)
+                        if len(text) > 25 and not _GARBAGE_TEXT_PATTERN.match(text):
+                            if not paragraphs or paragraphs[-1] != text:
+                                paragraphs.append(text)
 
                 clean_text_paragraphs = "\n\n".join(paragraphs)
 
-                # 6. Скомпонованный отчет для анализа LLM
                 md_report = [
                     f"### Title:\n{final_title}\n",
                     f"### Description:\n{final_desc}\n" if final_desc else "",
@@ -177,6 +209,7 @@ class SiteParserGateway:
                     "url": url,
                     "title": final_title,
                     "description": final_desc,
+                    "logo_url": logo_url,
                     "seo_meta": {
                         "title": final_title,
                         "description": final_desc,
@@ -186,15 +219,15 @@ class SiteParserGateway:
                         "tables": tables_markdown,
                         "faq_blocks": faq_blocks,
                     },
-                    # Полный отчет для LLM (LSA анализ)
                     "body_text": structured_raw_text,
-                    # Чистый непрерывный текст для точного расчета тошноты и детектора ИИ
                     "clean_text": clean_text_paragraphs or final_title,
                     "is_blocked": False
                 }
 
         except Exception as e:
+            import traceback
             print(f"[SiteParserGateway Exception for {url}]: {type(e).__name__} - {e}")
+            traceback.print_exc()
 
         real_title = fallback_title or f"Сайт {domain}"
         real_desc = fallback_desc or f"Страница {domain}"
@@ -203,6 +236,7 @@ class SiteParserGateway:
             "url": url,
             "title": real_title,
             "description": real_desc,
+            "logo_url": None,
             "seo_meta": {"title": real_title, "description": real_desc},
             "content_structure": {"headings": [], "tables": [], "faq_blocks": []},
             "body_text": "",

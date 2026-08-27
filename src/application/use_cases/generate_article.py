@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import httpx
 from sqlalchemy.orm.attributes import flag_modified
 
 from src.api.v1.text_router.schema import CalculateNauseaRequest
@@ -70,6 +72,7 @@ class GenerateArticleUseCase:
             parser_gateway: SiteParserGateway,
             image_gateway: ImageGenerationGateway,
             text_ai_service: TextAiService,
+
     ):
         self._uow = uow
         self._kie = ai_gateway
@@ -94,18 +97,29 @@ class GenerateArticleUseCase:
             company_name = target_site if target_site else "Наша компания"
             target_data_prompt = ""
             target_site_parse: dict[str, Any] | None = None
+            logo_bytes: bytes | None = None
 
             if target_site and (target_site.startswith("http://") or target_site.startswith("https://")):
                 print(f"[GenerateArticleUseCase]: Скачиваем данные сайта {target_site}...")
                 parsed_target = await self._parser.parse_site_to_graph(target_site)
                 target_site_parse = build_target_site_parse(target_site, parsed_target)
 
+                logo_url = parsed_target.get("logo_url")
+                if logo_url:
+                    print(f" [Found Logo URL]: {logo_url} — Скачиваем файл...")
+                    try:
+                        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as http_client:
+                            logo_res = await http_client.get(logo_url)
+                            if logo_res.status_code == 200 and len(logo_res.content) > 100:
+                                logo_bytes = logo_res.content
+                                print(f"✅ [Logo Downloaded Successfully]: {len(logo_bytes)} байт")
+                    except Exception as logo_err:
+                        print(f"⚠️ [Logo Download Skip]: {logo_err}")
+
                 if parsed_target and parsed_target.get("body_text"):
                     company_name = parsed_target.get("title") or target_site
                     target_data_prompt = f"""
                     РЕАЛЬНЫЕ ДАННЫЕ И ПРАЙСЫ НАШЕГО САЙТА ({target_site}):
-
-                    Настоящие тексты и цены с нашего сайта:
                     {parsed_target.get('body_text')}
                     """
 
@@ -137,12 +151,12 @@ class GenerateArticleUseCase:
                     {target_data_prompt}
 
                     {volume_instruction}
-                
+
                     ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
                     • В блоке meta:
                       - Title ДОЛЖЕН содержать ключ '{primary_keyword}' ровно 1 раз + название '{company_name}' (до 75 символов).
                       - Description ДОЛЖЕН содержать ключ '{primary_keyword}' ровно 1 раз + название '{company_name}' + выгоду/УТП (140-160 символов).
-                      
+
                     СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
                     {SEO_GENERATE_ARTICLE}
 
@@ -152,16 +166,17 @@ class GenerateArticleUseCase:
                     {ARTICLE_HTML_FORMAT_TEXT}
                     """
 
+            # 2. Генерация текста статьи
             content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
             )
             content = normalize_article_html(content)
 
+            # 3. Расчет SEO-метрик
             clean_text = re.sub(r"<style[^>]*>.*?</style>", " ", content, flags=re.DOTALL | re.IGNORECASE)
             clean_text = re.sub(r"<[^>]+>", " ", clean_text)
             clean_text = re.sub(r"\s+", " ", clean_text).strip()
-
 
             char_count = len(clean_text)
             char_count_no_spaces = len(clean_text.replace(" ", ""))
@@ -186,15 +201,17 @@ class GenerateArticleUseCase:
                     "aiReason": detect_res.reason,
                 }
                 print(
-                    f" [SEO Metrics]: Тошнота={nausea_res.academic_nausea}%, Человечность={detect_res.human_percentage}%")
+                    f"[SEO Metrics]: Символов={char_count}, Тошнота={nausea_res.academic_nausea}%, Человечность={detect_res.human_percentage}%")
             except Exception as metric_err:
-                print(f" [SEO Metrics Warning]: Не удалось рассчитать метрики: {metric_err}")
+                print(f"⚠️ [SEO Metrics Warning]: {metric_err}")
 
+            # 4. Генерация картинок с передачей файла логотипа (bytes)
             generated_images: list[dict[str, str]] = []
             try:
                 img_prompt_request = GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE.format(
                     topic=topic,
-                    company_name=company_name
+                    company_name=company_name,
+                    images_count=images_count,
                 )
                 prompts_json_text = await self._kie.generate_completion(
                     [{"role": "user", "content": img_prompt_request}]
@@ -212,7 +229,8 @@ class GenerateArticleUseCase:
                     try:
                         url = await self._image_gateway.generate_and_save_image(
                             prompt=item["prompt"],
-                            filename_prefix=f"proj_{project.id.hex[:6]}_img{idx}"
+                            filename_prefix=f"proj_{project.id.hex[:6]}_img{idx}",
+                            image_reference_bytes=logo_bytes,
                         )
                         return {
                             "url": url,
@@ -232,6 +250,7 @@ class GenerateArticleUseCase:
             except Exception as img_err:
                 print(f"⚠️ [Images Warning]: {img_err}")
 
+            # 5. Сохранение в БД
             if updated_history and updated_history[-1].get("role") == "assistant":
                 updated_history[-1]["content"] = content
 
@@ -246,9 +265,7 @@ class GenerateArticleUseCase:
                 seo_metrics=seo_metrics_dict,
             )
             await uow.articles.add(article)
-
-            saved_article_file = save_article_to_html(article)
-            print(f"[Article Saved to File]: {saved_article_file}")
+            save_article_to_html(article)
 
             return GenerateArticleResult(
                 article=article,
