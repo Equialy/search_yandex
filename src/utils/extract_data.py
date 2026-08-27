@@ -1,8 +1,10 @@
 import io
 import re
-
+from urllib.parse import urljoin
 from PIL import Image
 from bs4 import BeautifulSoup, Tag
+
+_EXCLUDE_KEYWORDS = ("icon", "social", "flag", "pixel", "counter", "banner", "avatar")
 
 
 def extract_html_metadata(html_content: str, fallback_title: str) -> tuple[str, str, str]:
@@ -14,12 +16,10 @@ def extract_html_metadata(html_content: str, fallback_title: str) -> tuple[str, 
     if not html_content:
         return h1_text, title_text, desc_text
 
-    # 1. Извлечение H1
     h1_match = re.search(r"<h1[^>]*>(.*?)</h1>", html_content, flags=re.IGNORECASE | re.DOTALL)
     if h1_match:
         h1_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip()
 
-    # 2. Извлечение Title и Description из блока .seo-article__meta
     title_match = re.search(r"<strong>Title:</strong>\s*(.*?)</p>", html_content, flags=re.IGNORECASE | re.DOTALL)
     if title_match:
         title_text = re.sub(r"<[^>]+>", "", title_match.group(1)).strip()
@@ -31,66 +31,110 @@ def extract_html_metadata(html_content: str, fallback_title: str) -> tuple[str, 
     return h1_text, title_text, desc_text
 
 
+def remove_meta_block_from_html(html_content: str) -> str:
+    """Удаляет блок .seo-article__meta и его CSS-класс из HTML-разметки."""
+    if not html_content:
+        return html_content
+
+    # Удаляем сам блок div с метатегами
+    cleaned = re.sub(
+        r'<div[^>]*class=["\'][^"\']*seo-article__meta[^"\']*["\'][^>]*>.*?</div>',
+        "",
+        html_content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Удаляем упоминания стилей .seo-article__meta { ... }
+    cleaned = re.sub(
+        r'\.seo-article__meta\s*\{[^}]*\}',
+        "",
+        cleaned,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return cleaned.strip()
 
 
-from urllib.parse import urljoin, urlparse
+def _get_img_src(img_tag: Tag) -> str | None:
+    for attr in ("src", "data-src", "data-original", "data-lazy-src"):
+        src = img_tag.get(attr)
+        if src and isinstance(src, str) and not src.startswith("data:image"):
+            return src.strip()
+    return None
 
 
 def _extract_logo_url(soup: BeautifulSoup, base_url: str) -> str | None:
-    """Гарантированно находит логотип сайта."""
     if not soup:
         return None
-
     try:
-        # 1. Поиск по ссылкам логотипа (как на твоем скриншоте: a.isar-logo-link > img)
-        for a_tag in soup.find_all("a", class_=re.compile(r"logo|brand|home", re.I)):
-            img = a_tag.find("img")
-            if isinstance(img, Tag):
-                src = img.get("src") or img.get("data-src")
-                if src and isinstance(src, str):
-                    return urljoin(base_url, src.strip())
+        header = soup.find("header") or soup.find(class_=re.compile(r"header|topbar|navbar", re.I))
+        search_scopes = [header, soup] if header else [soup]
 
-        # 2. Поиск картинок с классом logo / brand (как .isar-logo-img)
-        for img in soup.find_all("img", class_=re.compile(r"logo|brand|header", re.I)):
-            src = img.get("src") or img.get("data-src")
-            if src and isinstance(src, str):
-                return urljoin(base_url, src.strip())
+        for scope in search_scopes:
+            if not scope or not isinstance(scope, Tag):
+                continue
 
-        # 3. Поиск любого img со словом logo в src или alt (например, logo_matrix_white.png)
-        for img in soup.find_all("img"):
-            src = img.get("src") or img.get("data-src") or ""
-            alt = img.get("alt") or ""
-            full_str = f"{src} {alt}".lower()
-            if "logo" in full_str or "логотип" in full_str:
-                if not any(exc in full_str for exc in ["icon", "social", "flag"]):
-                    return urljoin(base_url, str(src).strip())
+            for a_tag in scope.find_all("a", class_=re.compile(r"logo|brand|home", re.I)):
+                if isinstance(a_tag, Tag):
+                    img = a_tag.find("img")
+                    if isinstance(img, Tag):
+                        src = _get_img_src(img)
+                        if src:
+                            return urljoin(base_url, src)
 
-        # 4. Поиск в шапке (первая адекватная картинка в header)
-        header = soup.find("header") or soup.find(class_=re.compile(r"header|top", re.I))
-        if header and isinstance(header, Tag):
-            for img in header.find_all("img"):
-                src = img.get("src") or img.get("data-src")
-                if src and isinstance(src, str):
-                    return urljoin(base_url, src.strip())
+            for img in scope.find_all("img", class_=re.compile(r"logo|brand", re.I)) + \
+                       scope.find_all("img", id=re.compile(r"logo|brand", re.I)):
+                if isinstance(img, Tag):
+                    src = _get_img_src(img)
+                    if src and not any(k in src.lower() for k in _EXCLUDE_KEYWORDS):
+                        return urljoin(base_url, src)
 
-        # 5. OpenGraph
-        og = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
+            for img in scope.find_all("img"):
+                if isinstance(img, Tag):
+                    src = _get_img_src(img)
+                    alt = str(img.get("alt", "")).lower()
+                    if src:
+                        full_str = f"{src.lower()} {alt}"
+                        if ("logo" in full_str or "логотип" in full_str) and not any(k in full_str for k in _EXCLUDE_KEYWORDS):
+                            return urljoin(base_url, src)
+
+        og = soup.find("meta", property=re.compile(r"og:image", re.I)) or \
+             soup.find("meta", attrs={"name": re.compile(r"og:image", re.I)})
         if isinstance(og, Tag) and og.get("content"):
             return urljoin(base_url, str(og["content"]).strip())
 
     except Exception as e:
-        print(f"[Logo Error]: {e}")
+        print(f"[Logo Extract Error]: {e}")
 
     return None
 
-
-
-def _prepare_image_png_bytes(raw_bytes: bytes) -> bytes:
-    """Конвертирует изображение в валидный PNG RGBA формат для OpenAI API."""
+def _prepare_image_png_bytes(raw_bytes: bytes, target_size: int = 1024) -> bytes:
+    """
+    Приводит любое изображение логотипа к строгому стандарту OpenAI images/edits:
+    - Конвертирует в RGBA PNG
+    - Вписывает прямоугольный логотип по центру квадратного прозрачного холста (target_size x target_size)
+    - Гарантирует правильный формат без искажения пропорций
+    """
     try:
-        img = Image.open(io.BytesIO(raw_bytes))
-        out = io.BytesIO()
-        img.convert("RGBA").save(out, format="PNG")
-        return out.getvalue()
-    except Exception:
+        with Image.open(io.BytesIO(raw_bytes)) as img:
+            img = img.convert("RGBA")
+            orig_w, orig_h = img.size
+
+            max_logo_dimension = int(target_size * 0.75)
+            scale = min(max_logo_dimension / orig_w, max_logo_dimension / orig_h)
+            new_w = max(1, int(orig_w * scale))
+            new_h = max(1, int(orig_h * scale))
+
+            resized_logo = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            square_canvas = Image.new("RGBA", (target_size, target_size), (0, 0, 0, 0))
+
+            offset_x = (target_size - new_w) // 2
+            offset_y = (target_size - new_h) // 2
+            square_canvas.paste(resized_logo, (offset_x, offset_y), mask=resized_logo.split()[-1])
+
+            out = io.BytesIO()
+            square_canvas.save(out, format="PNG", optimize=True)
+            return out.getvalue()
+
+    except Exception as e:
+        print(f"[Prepare Image Bytes Error]: {e}")
         return raw_bytes

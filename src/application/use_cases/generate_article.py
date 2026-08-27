@@ -24,6 +24,7 @@ from src.infrastructure.database.models.competitors import Article
 from src.infrastructure.gateways.image_gateway import ImageGenerationGateway
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
+from src.utils.extract_data import remove_meta_block_from_html
 
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -154,9 +155,14 @@ class GenerateArticleUseCase:
 
                     ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
                     • В блоке meta:
-                        • В блоке meta генерируй ТОЛЬКО Description (140-160 символов, содержит ключ '{primary_keyword}' + '{company_name}').
+                        - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
+                        - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
+                        
                         • КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО добавлять тег <h1> и поле Title. Начинай статью сразу с первого абзаца и подзаголовков <h2>.
-                     
+                        
+                    ПЕРВЫЙ АБЗАЦ СТАТЬИ:
+                        - В самом первом абзаце (в первом или втором предложении) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
+                       
                     СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
                     {SEO_GENERATE_ARTICLE}
 
@@ -172,7 +178,7 @@ class GenerateArticleUseCase:
                 user_prompt=prompt
             )
             content = normalize_article_html(content)
-
+            content = remove_meta_block_from_html(content)
             # 3. Расчет SEO-метрик
             clean_text = re.sub(r"<style[^>]*>.*?</style>", " ", content, flags=re.DOTALL | re.IGNORECASE)
             clean_text = re.sub(r"<[^>]+>", " ", clean_text)

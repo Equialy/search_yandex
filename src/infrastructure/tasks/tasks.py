@@ -10,7 +10,7 @@ from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.tasks import TaskStatus
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.generate_article import GenerateArticleUseCase
-from src.utils.extract_data import extract_html_metadata
+from src.utils.extract_data import extract_html_metadata, remove_meta_block_from_html
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +167,10 @@ async def generate_reports_article_pipeline_task(
         article = gen_result.article
         h1_val, title_val, desc_val = extract_html_metadata(article.content, final_topic)
 
+        clean_html_content = remove_meta_block_from_html(article.content)
+
         metrics = article.seo_metrics or {}
-        char_count = int(metrics.get("charCount") or len(article.content))
+        char_count = int(metrics.get("charCount") or len(clean_html_content))
         toshnota = int(metrics.get("academicNausea") or 8)
         human = int(metrics.get("humanPercentage") or 85)
         base_public_url = settings.base_url.rstrip("/")
@@ -183,9 +185,9 @@ async def generate_reports_article_pipeline_task(
         report_payload = SendArticleReportPayload(
             id_task=id_task,
             content=public_html_content,
-            text_title=title_val,
+            text_title=title_val or final_topic,
             text_description=desc_val,
-            text_H1=h1_val,
+            text_H1=h1_val or final_topic,
             text_count_char=char_count,
             text_toshnota=toshnota,
             text_human=human,
