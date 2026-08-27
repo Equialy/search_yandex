@@ -1,13 +1,6 @@
 SEO_GUIDELINE_TEXT = """
 СТРОГАЯ МЕТОДИЧКА ПО НАПИСАНИЮ СТАТЕЙ И СТРАНИЦ УСЛУГ:
 
-Title и Description
-Title:
-• до 70 символов;
-• содержит главный ключ и название компании;
-• отражает услугу;
-• делает упор на выгоду или ценность;
-• формулируется естественно.
 Description:
 • 150–160 символов;
 • содержит главный ключ, название компании и один хвост;
@@ -15,11 +8,7 @@ Description:
 • учитывает, что это услуга;
 • формулируется естественно.
 
-Заголовки (H1–H3)
-• H1 — строго один на страницу.
-  - содержит главный ключ;
-  - формулируется естественно;
-  - отражает суть услуги.
+Заголовки (H2-H3)
 • H2–H3 — подзаголовки смысловых блоков.
   - раскрывают содержание раздела;
   - не дублируют друг друга;
@@ -185,8 +174,7 @@ ARTICLE_HTML_FORMAT_TEXT = """
 
 <style>
   .seo-article { ... базовые стили контейнера: шрифт, цвет, line-height, max-width ... }
-  .seo-article__meta { ... блок Title/Description ... }
-  .seo-article h1 { ... }
+  .seo-article__meta { ... блок Description ... }
   .seo-article h2, .seo-article h3 { ... }
   .seo-article p { ... }
   .seo-article ul, .seo-article ol { ... }
@@ -197,10 +185,8 @@ ARTICLE_HTML_FORMAT_TEXT = """
 
 <div class="seo-article">
   <div class="seo-article__meta">
-    <p><strong>Title:</strong> ...</p>
     <p><strong>Description:</strong> ...</p>
   </div>
-  <h1>Главный заголовок</h1>
   <p>...</p>
   <h2>...</h2>
   <table class="seo-article__table">...</table>
@@ -208,7 +194,7 @@ ARTICLE_HTML_FORMAT_TEXT = """
 </div>
 
 ПРАВИЛА:
-• Используй семантические теги: h1 (один), h2, h3, p, ul, ol, li, strong, em, table, thead, tbody, tr, th, td.
+• Используй семантические теги:  h2, h3, p, ul, ol, li, strong, em, table, thead, tbody, tr, th, td.
 • Таблицы — с class="seo-article__table", заголовки колонок короткие (1–3 слова).
 • CSS должен быть аккуратным, читаемым, без @import и url() на внешние ресурсы.
 • Все теги корректно закрыты.
@@ -231,9 +217,9 @@ CHAT_VISION_STYLE_HINT = """
 
 ОБЯЗАТЕЛЬНО:
 • Ответ — ТОЛЬКО полный HTML: сначала <style> с классами seo-article*, затем <div class="seo-article">...
-• Запрещено отвечать plain text, markdown, списком «Title:/Description:/H1:» без HTML-тегов.
+• Запрещено отвечать plain text, markdown, списком «Description:» без HTML-тегов.
 • В CSS используй hex-цвета с скриншота (фиолетовый/бирюзовый header, акцентные кнопки, фоны секций).
-• Таблицы, h1, h2 должны визуально напоминать референс (цвета заголовков, borders, padding).
+• Таблицы, h2 должны визуально напоминать референс (цвета заголовков, borders, padding).
 """
 
 CHAT_VISION_HTML_ONLY_HINT = """
@@ -275,11 +261,10 @@ VISION_STYLE_APPLY_PROMPT = """
 ПРАВИЛА:
 1. Сохрани ВСЕ тексты, заголовки, таблицы и структуру markup БЕЗ ИЗМЕНЕНИЙ.
 2. Напиши новый блок <style> с классами seo-article*, используя tokens ниже.
-3. Используй gradientHeader для h1 или акцентных блоков, primaryColor/secondaryColor для заголовков.
-4. Таблицы — tableHeaderBackground, tableBorderColor, tableRowAltBackground как на референсе.
-5. Фон статьи — bodyBackground (часто белый), текст — bodyTextColor.
-6. НЕ используй дефолтные серые #f5f5f5/#ccc если tokens другие.
-7. Ответ: только <style>...</style> + существующий markup (div.seo-article...). Без markdown.
+3. Таблицы — tableHeaderBackground, tableBorderColor, tableRowAltBackground как на референсе.
+4. Фон статьи — bodyBackground (часто белый), текст — bodyTextColor.
+5. НЕ используй дефолтные серые #f5f5f5/#ccc если tokens другие.
+6. Ответ: только <style>...</style> + существующий markup (div.seo-article...). Без markdown.
 
 DESIGN TOKENS:
 {design_tokens}
@@ -293,18 +278,12 @@ MARKUP СТАТЬИ (не меняй текст, только добавь/за�
 
 SEO_GENERATE_ARTICLE = """
     Мета-теги
-1. Главный поисковый ключ ДОЛЖЕН БЫТЬ УПОТРЕБЛЕН РОВНО 1 РАЗ в Title и РОВНО 1 РАЗ в Description!
-2. Title:
-   • Длина: до 70–80 символов;
-   • Обязательно содержит главный поисковый ключ и название компании;
-   • Делает акцент на выгоде или сути услуги;
-   • Формулируется естественно и привлекательно для клика в поиске.
+1. Главный поисковый ключ ДОЛЖЕН БЫТЬ УПОТРЕБЛЕН РОВНО 1 РАЗ в Description!
 
 3. Description:
    • Длина: 140–160 символов;
    • Обязательно содержит главный поисковый ключ (ровно 1 раз в естественной форме);
    • Содержит название компании и ключевые выгоды (сроки, цены, гарантии или опыт);
-   • Не дублирует Title дословно, а дополняет его как кликабельный сниппет.
 
 
 ТОНАЛЬНОСТЬ И СТИЛЬ (ПИШИ КАК ОПЫТНЫЙ B2B-ЭКСПЕРТ):

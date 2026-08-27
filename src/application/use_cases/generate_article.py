@@ -112,9 +112,9 @@ class GenerateArticleUseCase:
                             logo_res = await http_client.get(logo_url)
                             if logo_res.status_code == 200 and len(logo_res.content) > 100:
                                 logo_bytes = logo_res.content
-                                print(f"✅ [Logo Downloaded Successfully]: {len(logo_bytes)} байт")
+                                print(f"[Logo Downloaded Successfully]: {len(logo_bytes)} байт")
                     except Exception as logo_err:
-                        print(f"⚠️ [Logo Download Skip]: {logo_err}")
+                        print(f"[Logo Download Skip]: {logo_err}")
 
                 if parsed_target and parsed_target.get("body_text"):
                     company_name = parsed_target.get("title") or target_site
@@ -154,9 +154,9 @@ class GenerateArticleUseCase:
 
                     ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
                     • В блоке meta:
-                      - Title ДОЛЖЕН содержать ключ '{primary_keyword}' ровно 1 раз + название '{company_name}' (до 75 символов).
-                      - Description ДОЛЖЕН содержать ключ '{primary_keyword}' ровно 1 раз + название '{company_name}' + выгоду/УТП (140-160 символов).
-
+                        • В блоке meta генерируй ТОЛЬКО Description (140-160 символов, содержит ключ '{primary_keyword}' + '{company_name}').
+                        • КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО добавлять тег <h1> и поле Title. Начинай статью сразу с первого абзаца и подзаголовков <h2>.
+                     
                     СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
                     {SEO_GENERATE_ARTICLE}
 
