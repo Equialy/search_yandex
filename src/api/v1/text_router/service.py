@@ -2,7 +2,7 @@
 import json
 
 from src.api.v1.text_router.schema import DetectResponse, HumanizeResponse
-from src.infrastructure.gateways.openai_gateway import OpenAiGateway
+from src.infrastructure.gateways.kie_api import KieApiGateway
 import math
 import re
 from collections import Counter
@@ -15,7 +15,7 @@ from src.api.v1.text_router.schema import (
 )
 STOP_POS = {'PREP', 'CONJ', 'PRCL', 'NPRO', 'INTJ'}
 class TextAiService:
-    def __init__(self, ai_gateway: OpenAiGateway,     morph: pymorphy3.MorphAnalyzer,):
+    def __init__(self, ai_gateway: KieApiGateway,     morph: pymorphy3.MorphAnalyzer,):
         self.openai = ai_gateway
         self._morph = morph
 

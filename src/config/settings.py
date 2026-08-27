@@ -29,6 +29,8 @@ class KIEConfig(BaseModel):
     API_KEY: str
     callback_url: str
     KIE_BASE_URL: str
+    CHAT_MODEL: str
+    IMAGE_MODEL: str
     jobs_endpoint: str =  Field(
         default="/api/v1/jobs/createTask",
     )

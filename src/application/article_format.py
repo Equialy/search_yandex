@@ -7,14 +7,28 @@ def has_styled_article_html(content: str) -> bool:
     return bool(text) and "<style" in text and ("seo-article" in text or "<h1" in text)
 
 
-def normalize_article_html(content: str) -> str:
-    """Убирает markdown-обёртки ```html и лишние пробелы из ответа LLM."""
-    text = (content or "").strip()
-    if not text.startswith("```"):
-        return text
+def normalize_article_html(html_text: str) -> str:
+    """Очищает HTML-ответ от markdown-обёрток, артефактов writing/canvas и мусора."""
+    if not html_text:
+        return ""
 
-    text = re.sub(r"^```(?:html)?\s*\n?", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\n?```\s*$", "", text)
+    text = html_text.strip()
+
+    text = re.sub(r":::[a-zA-Z0-9_-]+(?:\{.*?\})?", "", text)
+    text = re.sub(r"^:::\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r":::$", "", text).strip()
+
+    text = re.sub(r"^```(?:html|css|xml)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+
+    match = re.search(r"(<style\b|<div\b)", text, re.IGNORECASE)
+    if match:
+        text = text[match.start():]
+
+    last_div_idx = text.rfind("</div>")
+    if last_div_idx != -1:
+        text = text[:last_div_idx + len("</div>")]
+
     return text.strip()
 
 

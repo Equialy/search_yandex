@@ -1,5 +1,8 @@
 from dishka import Provider, Scope, provide
 
+from src.application.uow import UnitOfWorkProtocol
+from src.infrastructure.gateways.image_kie_gateway import ImageKieGenerationGateway
+from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.api.v1.text_router.service import TextAiService
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
 from src.application.use_cases.list_projects import ListProjectsUseCase
@@ -14,6 +17,40 @@ from src.application.use_cases.get_project import GetProjectUseCase
 
 
 class CompetitorsProvider(Provider):
+
+    @provide(scope=Scope.REQUEST)
+    def get_analyze_competitors_use_case(
+            self,
+            uow: UnitOfWorkProtocol,
+            yandex_gateway: YandexSearchGateway,
+            parser_gateway: SiteParserGateway,
+            kie_gateway: KieApiGateway,
+            text_ai_service: TextAiService,
+    ) -> AnalyzeCompetitorsUseCase:
+        return AnalyzeCompetitorsUseCase(
+            uow=uow,
+            yandex_gateway=yandex_gateway,
+            parser_gateway=parser_gateway,
+            ai_gateway=kie_gateway,
+            text_ai_service=text_ai_service,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def get_generate_article_use_case(
+            self,
+            uow: UnitOfWorkProtocol,
+            kie_gateway: KieApiGateway,
+            parser_gateway: SiteParserGateway,
+            image_gateway: ImageKieGenerationGateway,
+            text_ai_service: TextAiService,
+    ) -> GenerateArticleUseCase:
+        return GenerateArticleUseCase(
+            uow=uow,
+            ai_gateway=kie_gateway,
+            parser_gateway=parser_gateway,
+            image_gateway=image_gateway,
+            text_ai_service=text_ai_service,
+        )
 
     yandex_gateway = provide(
         YandexSearchGateway,

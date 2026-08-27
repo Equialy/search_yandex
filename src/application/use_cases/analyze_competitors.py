@@ -1,14 +1,11 @@
-import json
 import uuid
-from datetime import datetime, timezone
-from pathlib import Path
 from sqlalchemy.orm.attributes import flag_modified
 
 from src.application.prompts import ANALYZE_CONCURENTS
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import CompetitorData, Project
-from src.infrastructure.gateways.openai_gateway import OpenAiGateway
+from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.infrastructure.gateways.yandex_search import YandexSearchGateway
 from src.api.v1.text_router.service import TextAiService
@@ -24,7 +21,7 @@ class AnalyzeCompetitorsUseCase:
             uow: UnitOfWorkProtocol,
             yandex_gateway: YandexSearchGateway,
             parser_gateway: SiteParserGateway,
-            ai_gateway: OpenAiGateway,
+            ai_gateway: KieApiGateway,
             text_ai_service: TextAiService,
     ):
         self._uow = uow

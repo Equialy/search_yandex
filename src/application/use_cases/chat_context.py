@@ -21,8 +21,9 @@ from src.application.article_format import (
     truncate_for_style_context,
 )
 from src.infrastructure.database.models.competitors import Article
-from src.infrastructure.gateways.openai_gateway import OpenAiGateway
-from src.infrastructure.gateways.image_gateway import ImageGenerationGateway
+from src.infrastructure.gateways.image_kie_gateway import ImageKieGenerationGateway
+from src.infrastructure.gateways.kie_api import KieApiGateway
+
 
 
 IMAGE_REGEN_PATTERNS = re.compile(
@@ -47,8 +48,8 @@ class ContinueContextChatUseCase:
     def __init__(
         self,
         uow: UnitOfWorkProtocol,
-        ai_gateway: OpenAiGateway,
-        image_gateway: ImageGenerationGateway,
+        ai_gateway: KieApiGateway,
+        image_gateway: ImageKieGenerationGateway,
     ):
         self._uow = uow
         self._openai = ai_gateway

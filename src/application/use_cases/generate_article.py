@@ -21,8 +21,9 @@ from src.application.prompts import (
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import Article
-from src.infrastructure.gateways.image_gateway import ImageGenerationGateway
-from src.infrastructure.gateways.openai_gateway import OpenAiGateway
+from src.infrastructure.gateways.image_kie_gateway import \
+    ImageKieGenerationGateway
+from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.utils.extract_data import remove_meta_block_from_html
 
@@ -69,9 +70,9 @@ class GenerateArticleUseCase:
     def __init__(
             self,
             uow: UnitOfWorkProtocol,
-            ai_gateway: OpenAiGateway,
+            ai_gateway: KieApiGateway,
             parser_gateway: SiteParserGateway,
-            image_gateway: ImageGenerationGateway,
+            image_gateway: ImageKieGenerationGateway,
             text_ai_service: TextAiService,
 
     ):
@@ -98,6 +99,7 @@ class GenerateArticleUseCase:
             company_name = target_site if target_site else "Наша компания"
             target_data_prompt = ""
             target_site_parse: dict[str, Any] | None = None
+            logo_url: str | None = None
             logo_bytes: bytes | None = None
 
             if target_site and (target_site.startswith("http://") or target_site.startswith("https://")):
@@ -157,12 +159,12 @@ class GenerateArticleUseCase:
                     • В блоке meta:
                         - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
                         - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
-                        
+
                         • КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО добавлять тег <h1> и поле Title. Начинай статью сразу с первого абзаца и подзаголовков <h2>.
-                        
+
                     ПЕРВЫЙ АБЗАЦ СТАТЬИ:
                         - В самом первом абзаце (в первом или втором предложении) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
-                       
+
                     СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
                     {SEO_GENERATE_ARTICLE}
 
@@ -172,13 +174,14 @@ class GenerateArticleUseCase:
                     {ARTICLE_HTML_FORMAT_TEXT}
                     """
 
-            # 2. Генерация текста статьи
+            # 2. Генерация текста статьи через KIE.AI
             content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
             )
             content = normalize_article_html(content)
             content = remove_meta_block_from_html(content)
+
             # 3. Расчет SEO-метрик
             clean_text = re.sub(r"<style[^>]*>.*?</style>", " ", content, flags=re.DOTALL | re.IGNORECASE)
             clean_text = re.sub(r"<[^>]+>", " ", clean_text)
@@ -211,7 +214,7 @@ class GenerateArticleUseCase:
             except Exception as metric_err:
                 print(f"⚠️ [SEO Metrics Warning]: {metric_err}")
 
-            # 4. Генерация картинок с передачей файла логотипа (bytes)
+            # 4. Генерация картинок через KIE.AI (Nano Banana 2 Lite)
             generated_images: list[dict[str, str]] = []
             try:
                 img_prompt_request = GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE.format(
@@ -237,6 +240,7 @@ class GenerateArticleUseCase:
                             prompt=item["prompt"],
                             filename_prefix=f"proj_{project.id.hex[:6]}_img{idx}",
                             image_reference_bytes=logo_bytes,
+                            image_reference_url=logo_url,
                         )
                         return {
                             "url": url,

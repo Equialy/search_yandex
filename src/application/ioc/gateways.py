@@ -3,8 +3,8 @@ from dishka import Provider, Scope, provide
 from openai import AsyncOpenAI
 
 from src.infrastructure.gateways.image_gateway import ImageGenerationGateway
+from src.infrastructure.gateways.image_kie_gateway import ImageKieGenerationGateway
 from src.infrastructure.gateways.kie_api import KieApiGateway
-from src.infrastructure.gateways.llm_gateway import LLMGateway
 from src.infrastructure.gateways.openai_gateway import OpenAiGateway
 from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
@@ -22,8 +22,19 @@ class GatewaysProvider(Provider):
         return ImageGenerationGateway(openai_client=openai_client, http_client=http_client)
 
     @provide(scope=Scope.APP)
-    def get_site_parser(self, http_client: httpx.AsyncClient, openai_gateway: OpenAiGateway) -> SiteParserGateway:
-        return SiteParserGateway(http_client=http_client, openai_gateway=openai_gateway)
+    def get_site_parser(self, http_client: httpx.AsyncClient) -> SiteParserGateway:
+        return SiteParserGateway(http_client=http_client)
+
+    @provide(scope=Scope.APP)
+    def get_kie_gateway(self, http_client: httpx.AsyncClient) -> KieApiGateway:
+        return KieApiGateway(http_client=http_client)
+
+    @provide(scope=Scope.REQUEST)
+    def get_image_kie_gateway(
+            self,
+            http_client: httpx.AsyncClient
+    ) -> ImageKieGenerationGateway:
+        return ImageKieGenerationGateway(http_client=http_client)
 
     yandex_gateway = provide(
         YandexSearchGateway,
