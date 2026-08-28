@@ -2,6 +2,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 import httpx
 
 from src.config.settings import BASE_DIR, settings
@@ -10,11 +11,21 @@ from src.utils.convert_images import _compress_and_save_webp
 IMAGES_DIR = BASE_DIR / "static" / "images" / "articles"
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
+ALLOWED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def _is_valid_image_url(url: str | None) -> bool:
+    """Проверяет, подходит ли ссылка для KIE.AI (исключает SVG и битые ссылки)."""
+    if not url or not isinstance(url, str) or not url.startswith("http"):
+        return False
+
+    parsed_path = urlparse(url).path.lower()
+    return any(parsed_path.endswith(ext) for ext in ALLOWED_IMAGE_EXTENSIONS)
+
 
 class ImageKieGenerationGateway:
     """
     Шлюз генерации изображений через KIE.AI (Google Nano Banana 2 Lite).
-    Принимает prompt и референсные URL картинок (image_urls).
     """
 
     def __init__(self, http_client: httpx.AsyncClient):
@@ -37,12 +48,16 @@ class ImageKieGenerationGateway:
             "Content-Type": "application/json"
         }
 
-        # 1. Добавляем референс логотипа, если есть URL
+        clean_ref_url = (image_reference_url or "").split("#")[0].strip()
         image_urls = []
-        if image_reference_url and image_reference_url.startswith("http"):
-            image_urls.append(image_reference_url)
 
-        # Выбираем пропорции (aspect_ratio)
+        if _is_valid_image_url(clean_ref_url):
+            image_urls.append(clean_ref_url)
+        else:
+            if clean_ref_url:
+                print(
+                    f"[ImageKieGateway]: Референс {clean_ref_url} пропущен (SVG или неподдерживаемый формат, модель сгенерирует по тексту)")
+
         aspect_ratio = "1:1"
         if "1792" in size or "16:9" in size:
             aspect_ratio = "16:9"
@@ -60,10 +75,13 @@ class ImageKieGenerationGateway:
 
         print(f"[ImageKieGateway]: Создание задачи в KIE.AI ({self._model}) с {len(image_urls)} референс-URL...")
         res = await self._http.post(create_task_url, json=payload, headers=headers, timeout=40.0)
-        res.raise_for_status()
 
         resp_data = res.json()
-        task_id = resp_data.get("data", {}).get("taskId")
+        data_block = resp_data.get("data")
+        if not data_block or not isinstance(data_block, dict):
+            raise ValueError(f"Ошибка KIE.AI при создании задачи: {resp_data}")
+
+        task_id = data_block.get("taskId")
         if not task_id:
             raise ValueError(f"Не удалось получить taskId от KIE.AI: {resp_data}")
 
@@ -72,7 +90,7 @@ class ImageKieGenerationGateway:
         # 2. Опрос статуса задачи (polling)
         status_url = f"{self._base_url}/api/v1/jobs/recordInfo"
         result_img_url = None
-        max_attempts = 45  # До 90 секунд ожидания
+        max_attempts = 45
 
         for attempt in range(1, max_attempts + 1):
             await asyncio.sleep(2.0)
@@ -106,7 +124,7 @@ class ImageKieGenerationGateway:
                     raise ValueError(f"Генерация KIE.AI завершилась ошибкой: {fail_msg}")
 
             except Exception as poll_err:
-                print(f" [ImageKie Poll Warning #{attempt}]: {poll_err}")
+                print(f"[ImageKie Poll Warning #{attempt}]: {poll_err}")
 
         if not result_img_url:
             raise TimeoutError(f"Превышено время ожидания генерации KIE.AI (taskId={task_id})")
