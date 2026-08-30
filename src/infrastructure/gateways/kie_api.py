@@ -6,99 +6,67 @@ from src.config.settings import settings
 
 
 class KieApiGateway:
-    """Шлюз для быстрой генерации контента через KIE.AI API (Grok 4.3)."""
+    """Шлюз для генерации контента через KIE.AI API (GPT 5.2)."""
 
     def __init__(self, http_client: httpx.AsyncClient):
         self._client = http_client
         self._api_key = settings.kie.API_KEY
         self._base_url = settings.kie.KIE_BASE_URL.rstrip('/')
-        self._model = settings.kie.CHAT_MODEL
-        self._endpoint = "/grok/v1/responses"
+        self._endpoint = "/gpt-5-2/v1/chat/completions"
 
-    def _format_input_for_grok(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _format_messages_for_gpt52(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Преобразует сообщения в формат KIE.AI Grok:
-        [{'role': 'user', 'content': [{'type': 'input_text', 'text': '...'}]}]
+        Преобразует сообщения в строгий формат KIE.AI GPT-5.2:
         """
-        formatted_input = []
+        formatted_messages = []
         for msg in messages:
             role = msg.get("role", "user")
-
-            # Роль 'system' мапим в 'user' для стабильности эндпоинта
-            if role == "system" or role not in ("user", "assistant"):
-                role = "user"
-
             content = msg.get("content", "")
 
+            formatted_content = []
             if isinstance(content, str):
-                formatted_content = [{"type": "input_text", "text": content}]
+                formatted_content.append({"type": "text", "text": content})
             elif isinstance(content, list):
-                formatted_content = []
                 for part in content:
                     if isinstance(part, dict):
                         if part.get("type") in ("text", "input_text"):
-                            formatted_content.append({"type": "input_text", "text": part.get("text", "")})
+                            formatted_content.append({"type": "text", "text": part.get("text", "")})
+                        # Картинка
                         elif part.get("type") in ("image_url", "input_image"):
-                            img_url = part.get("image_url", "")
-                            if isinstance(img_url, dict):
-                                img_url = img_url.get("url", "")
-                            formatted_content.append({"type": "input_image", "image_url": str(img_url)})
+                            img_obj = part.get("image_url")
+                            if isinstance(img_obj, dict):
+                                img_url = img_obj.get("url", "")
+                            else:
+                                img_url = str(img_obj or "")
+                            formatted_content.append({"type": "image_url", "image_url": {"url": img_url}})
                         else:
                             formatted_content.append(part)
                     else:
-                        formatted_content.append({"type": "input_text", "text": str(part)})
+                        formatted_content.append({"type": "text", "text": str(part)})
             else:
-                formatted_content = [{"type": "input_text", "text": str(content)}]
+                formatted_content.append({"type": "text", "text": str(content)})
 
-            formatted_input.append({
+            formatted_messages.append({
                 "role": role,
                 "content": formatted_content
             })
-        return formatted_input
-
-    def _parse_grok_response(self, data: dict[str, Any]) -> tuple[str, str]:
-        """Извлекает текст ответа и reasoning из структуры output."""
-        content = ""
-        reasoning = ""
-
-        outputs = data.get("output", [])
-        for item in outputs:
-            item_type = item.get("type")
-            if item_type == "message":
-                for part in item.get("content", []):
-                    if part.get("type") == "output_text":
-                        content += part.get("text", "")
-                    elif part.get("text"):
-                        content += part.get("text", "")
-            elif item_type == "reasoning":
-                summaries = item.get("summary", [])
-                if isinstance(summaries, list):
-                    reasoning += " ".join(str(s) for s in summaries)
-                elif isinstance(summaries, str):
-                    reasoning += str(summaries)
-
-        if not content and isinstance(data.get("data"), dict):
-            return self._parse_grok_response(data["data"])
-
-        return content.strip(), reasoning.strip()
+        return formatted_messages
 
     async def generate_completion_with_reasoning(
             self,
             messages: list[dict[str, Any]],
-            reasoning_effort: str = "low",
+            reasoning_effort: str ,
     ) -> tuple[str, str]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json"
         }
 
+        effort = "low" if reasoning_effort.lower() == "low" else "high"
+
         payload = {
-            "model": self._model,
-            "stream": False,
-            "input": self._format_input_for_grok(messages),
-            "reasoning": {
-                "effort": "low"
-            }
+            "messages": self._format_messages_for_gpt52(messages),
+            "reasoning_effort": effort
         }
 
         url = f"{self._base_url}{self._endpoint}"
@@ -111,24 +79,28 @@ class KieApiGateway:
 
                 if response.status_code == 200:
                     data = response.json()
-                    content, reasoning = self._parse_grok_response(data)
-                    if content:
-                        return content, reasoning
-                    raise ValueError(f"Пустой content в ответе KIE.AI Grok ({url}): {data}")
+                    choices = data.get("choices", [])
+                    if not choices:
+                        raise ValueError(f"Пустой choices в ответе KIE.AI ({url}): {data}")
+
+                    msg_obj = choices[0].get("message", {})
+                    content = msg_obj.get("content") or ""
+                    reasoning = msg_obj.get("reasoning_content") or msg_obj.get("reasoning") or ""
+                    return content.strip(), reasoning.strip()
 
                 if response.status_code in (500, 502, 503, 504, 429):
                     last_error_text = response.text
-                    print(f"⚠️ [KIE.AI Grok Retry #{attempt}/{max_retries}]: Статус {response.status_code}. Ждем 2с...")
+                    print(f"⚠️ [KIE.AI GPT-5.2 Retry #{attempt}/{max_retries}]: Статус {response.status_code}. Ждем 2с...")
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
-                raise ValueError(f"Ошибка KIE.AI Grok ({response.status_code}): {response.text}")
+                raise ValueError(f"Ошибка KIE.AI GPT-5.2 ({response.status_code}): {response.text}")
 
             except httpx.RequestError as req_err:
                 print(f"⚠️ [KIE.AI Network Retry #{attempt}/{max_retries}]: {req_err}")
                 await asyncio.sleep(2.0 * attempt)
 
-        raise ValueError(f"Ошибка KIE.AI Grok после {max_retries} попыток: {last_error_text}")
+        raise ValueError(f"Ошибка KIE.AI GPT-5.2 после {max_retries} попыток: {last_error_text}")
 
     async def generate_completion(
             self,
