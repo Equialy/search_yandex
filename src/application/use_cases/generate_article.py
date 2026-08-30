@@ -25,7 +25,7 @@ from src.infrastructure.gateways.image_kie_gateway import \
     ImageKieGenerationGateway
 from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
-from src.utils.extract_data import remove_meta_block_from_html
+from src.utils.extract_data import remove_meta_block_from_html, convert_svg_to_png_bytes, normalize_logo_png
 
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -102,29 +102,24 @@ class GenerateArticleUseCase:
             logo_url: str | None = None
             logo_bytes: bytes | None = None
 
-            if target_site and (target_site.startswith("http://") or target_site.startswith("https://")):
-                print(f"[GenerateArticleUseCase]: Скачиваем данные сайта {target_site}...")
+            cdn_logo_url = None
+            if target_site and target_site.startswith("http"):
                 parsed_target = await self._parser.parse_site_to_graph(target_site)
                 target_site_parse = build_target_site_parse(target_site, parsed_target)
-
                 logo_url = parsed_target.get("logo_url")
+
                 if logo_url:
-                    print(f" [Found Logo URL]: {logo_url} — Скачиваем файл...")
                     try:
                         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as http_client:
                             logo_res = await http_client.get(logo_url)
-                            if logo_res.status_code == 200 and len(logo_res.content) > 100:
-                                logo_bytes = logo_res.content
-                                print(f"[Logo Downloaded Successfully]: {len(logo_bytes)} байт")
-                    except Exception as logo_err:
-                        print(f"[Logo Download Skip]: {logo_err}")
+                            if logo_res.status_code == 200 and len(logo_res.content) > 50:
+                                raw_logo = logo_res.content
+                                if logo_url.lower().endswith(".svg") or b"<svg" in raw_logo[:100].lower():
+                                    raw_logo = convert_svg_to_png_bytes(raw_logo)
 
-                if parsed_target and parsed_target.get("body_text"):
-                    company_name = parsed_target.get("title") or target_site
-                    target_data_prompt = f"""
-                    РЕАЛЬНЫЕ ДАННЫЕ И ПРАЙСЫ НАШЕГО САЙТА ({target_site}):
-                    {parsed_target.get('body_text')}
-                    """
+                                cdn_logo_url = await self._image_gateway.upload_image_to_cdn(raw_logo)
+                    except Exception as err:
+                        print(f"[Logo Upload Error]: {err}")
 
             competitor_lengths = [
                 len(c.raw_text)
@@ -215,50 +210,37 @@ class GenerateArticleUseCase:
                 print(f"⚠️ [SEO Metrics Warning]: {metric_err}")
 
             # 4. Генерация картинок через KIE.AI (Nano Banana 2 Lite)
-            generated_images: list[dict[str, str]] = []
+            generated_images = []
             try:
-                img_prompt_request = GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE.format(
+                img_prompt_req = GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE.format(
                     topic=topic,
                     company_name=company_name,
                     images_count=images_count,
                 )
-                prompts_json_text = await self._kie.generate_completion(
-                    [{"role": "user", "content": img_prompt_request}]
-                )
-                clean_json_str = (
-                    prompts_json_text.strip()
-                    .removeprefix("```json")
-                    .removeprefix("```")
-                    .removesuffix("```")
-                    .strip()
-                )
-                image_configs = json.loads(clean_json_str)[:images_count]
+                prompts_raw = await self._kie.generate_completion([{"role": "user", "content": img_prompt_req}])
+                clean_json = prompts_raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+                image_configs = json.loads(clean_json)[:images_count]
 
-                async def generate_single(idx: int, item: dict[str, str]) -> dict[str, str] | None:
+                async def generate_single(idx: int, item: dict[str, str]):
                     try:
                         url = await self._image_gateway.generate_and_save_image(
                             prompt=item["prompt"],
                             filename_prefix=f"proj_{project.id.hex[:6]}_img{idx}",
-                            image_reference_bytes=logo_bytes,
-                            image_reference_url=logo_url,
+                            image_url=cdn_logo_url,
                         )
-                        return {
-                            "url": url,
-                            "alt": item.get("alt", topic),
-                            "caption": item.get("caption", ""),
-                        }
+                        return {"url": url, "alt": item.get("alt", topic), "caption": item.get("caption", "")}
                     except Exception as err:
-                        print(f"⚠️ [Image {idx} Error]: {err}")
+                        print(f"[Image {idx} Error]: {err}")
                         return None
 
                 tasks = [generate_single(i, c) for i, c in enumerate(image_configs, 1)]
                 results = await asyncio.gather(*tasks)
-                generated_images = [r for r in results if r is not None]
+                generated_images = [r for r in results if r]
 
                 if generated_images:
                     content = inject_multiple_images_to_article(content, generated_images)
-            except Exception as img_err:
-                print(f"⚠️ [Images Warning]: {img_err}")
+            except Exception as err:
+                print(f"[Images Generation Error]: {err}")
 
             # 5. Сохранение в БД
             if updated_history and updated_history[-1].get("role") == "assistant":

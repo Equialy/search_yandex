@@ -3,6 +3,11 @@ import re
 from urllib.parse import urljoin
 from PIL import Image
 from bs4 import BeautifulSoup, Tag
+try:
+    from resvg_py import svg_to_bytes
+    RESVG_AVAILABLE = True
+except ImportError:
+    RESVG_AVAILABLE = False
 
 _EXCLUDE_KEYWORDS = ("icon", "social", "flag", "pixel", "counter", "banner", "avatar")
 
@@ -138,3 +143,38 @@ def _prepare_image_png_bytes(raw_bytes: bytes, target_size: int = 1024) -> bytes
     except Exception as e:
         print(f"[Prepare Image Bytes Error]: {e}")
         return raw_bytes
+
+
+def convert_svg_to_png_bytes(svg_data: bytes | str, target_width: int = 1024) -> bytes:
+    """Конвертирует SVG-код в валидный бинарный PNG через resvg_py."""
+    if not RESVG_AVAILABLE or not svg_data:
+        return svg_data if isinstance(svg_data, bytes) else svg_data.encode("utf-8")
+
+    try:
+        # resvg_py ожидает str на вход
+        if isinstance(svg_data, bytes):
+            svg_str = svg_data.decode("utf-8", errors="ignore")
+        else:
+            svg_str = str(svg_data)
+
+        # Выполняем рендер в PNG
+        png_bytes = svg_to_bytes(svg_str, width=target_width)
+        if png_bytes and len(png_bytes) > 50:
+            return bytes(png_bytes)
+
+    except Exception as e:
+        print(f"[resvg_py Error]: {e}")
+
+    # Фолбек, если что-то пошло не так
+    return svg_data if isinstance(svg_data, bytes) else svg_data.encode("utf-8")
+
+
+def normalize_logo_png(raw_bytes: bytes) -> bytes:
+    with Image.open(io.BytesIO(raw_bytes)) as img:
+        img = img.convert("RGBA")
+        # Создаем темную подложку чтобы белый логотип стал виден
+        background = Image.new("RGB", img.size, (20, 20, 20))
+        background.paste(img, mask=img.split()[-1])
+        out = io.BytesIO()
+        background.save(out, format="PNG")
+        return out.getvalue()
