@@ -1,12 +1,11 @@
 import asyncio
 from contextlib import asynccontextmanager
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from src.application.services.reports_api.poller import start_reports_polling_loop
-from src.infrastructure.database.engine import new_engine, new_session_maker
 from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.tasks.broker import broker
 from src.api.v1.agent.routers import router as agent_router
@@ -30,12 +29,9 @@ async def lifespan(app: FastAPI):
     if not broker.is_worker_process:
         await broker.startup()
 
-    limits = httpx.Limits(max_connections=100, max_keepalive_connections=20)
-    app.state.http_client = httpx.AsyncClient(limits=limits, timeout=60.0)
-
-    engine = new_engine(settings.db)
-    session_maker = new_session_maker(engine)
-    reports_gateway = ReportsArticleGateway(app.state.http_client)
+    container = app.state.dishka_container
+    reports_gateway = await container.get(ReportsArticleGateway)
+    session_maker = await container.get(async_sessionmaker[AsyncSession])
 
     poller_task = asyncio.create_task(
         start_reports_polling_loop(
@@ -60,9 +56,6 @@ async def lifespan(app: FastAPI):
             await poller_task
         except asyncio.CancelledError:
             pass
-
-        await engine.dispose()
-        await app.state.http_client.aclose()
 
         if not broker.is_worker_process:
             await broker.shutdown()
