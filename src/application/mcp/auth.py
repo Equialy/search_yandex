@@ -7,7 +7,7 @@ from src.config.settings import settings
 
 class CompetitorApiKeyVerifier(TokenVerifier):
     """Декодирует JWT-токен доступа для авторизации вызовов MCP."""
-
+    scopes_supported: list[str] = []
     required_scopes: list[str] = ["mcp"]
 
     async def verify_token(self, token: str | None) -> AccessToken | None:

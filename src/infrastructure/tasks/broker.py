@@ -8,6 +8,7 @@ broker -> ioc -> use_case -> tasks -> broker.
 
 Здесь только инфраструктура очереди: RabbitMQ (транспорт) + Redis (результаты).
 """
+from taskiq.brokers.shared_broker import async_shared_broker
 from taskiq_aio_pika import AioPikaBroker
 from taskiq_redis import RedisAsyncResultBackend
 
@@ -22,3 +23,5 @@ broker = AioPikaBroker(
     url=settings.rabbitmq.url,
     qos=1,
 ).with_result_backend(result_backend)
+
+async_shared_broker.default_broker(broker)

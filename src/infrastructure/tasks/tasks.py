@@ -1,11 +1,11 @@
 import logging
 from uuid import UUID
 from dishka.integrations.taskiq import FromDishka, inject
+from taskiq.brokers.shared_broker import async_shared_broker
 
 from src.api.v1.reports_api.schemas import SendArticleReportPayload
 from src.config.settings import settings
 from src.infrastructure.gateways.reports_article import ReportsArticleGateway
-from src.infrastructure.tasks.broker import broker
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.tasks import TaskStatus
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 
-@broker.task(task_name="generate_full_article_pipeline")
+@async_shared_broker.task(task_name="generate_full_article_pipeline")
 @inject
 async def generate_full_article_pipeline_task(
     task_id_str: str,
@@ -107,7 +107,7 @@ async def generate_full_article_pipeline_task(
 
 
 
-@broker.task(task_name="generate_reports_article_pipeline")
+@async_shared_broker.task(task_name="generate_reports_article_pipeline")
 @inject
 async def generate_reports_article_pipeline_task(
     id_task: int,

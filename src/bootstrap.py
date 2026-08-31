@@ -15,13 +15,10 @@ from src.api.v1.text_router.routers import router as text_router
 from src.application.mcp.router import router as mcp_connect_router
 from src.api.v1.tasks.routers import router as tasks_router
 from src.api.v1.reports_api.routers import router as reports_router
+from src.api.v1.auth.routers import router as auth_router
 
-# Импорты MCP для bootstrap
 from src.application.mcp.server import mount_mcp
 from src.application.mcp.proxy import set_mcp_app
-
-
-from src.api.v1.auth.routers import router as auth_router
 
 from src.config.settings import BASE_DIR, settings
 
@@ -49,17 +46,27 @@ async def lifespan(app: FastAPI):
     )
 
     set_mcp_app(app)
-    mcp_app = mount_mcp()
+    mcp_app = getattr(app.state, "mcp_app", None)
 
     try:
-        async with mcp_app.lifespan(app):
+        if mcp_app and hasattr(mcp_app, "lifespan"):
+            async with mcp_app.lifespan(app):
+                yield
+        else:
             yield
     finally:
         poller_task.cancel()
+        try:
+            await poller_task
+        except asyncio.CancelledError:
+            pass
+
         await engine.dispose()
         await app.state.http_client.aclose()
+
         if not broker.is_worker_process:
             await broker.shutdown()
+
 
 def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(auth_router)
@@ -70,7 +77,9 @@ def apply_routes(app: FastAPI) -> FastAPI:
     app.include_router(tasks_router)
     app.include_router(reports_router)
 
-    app.mount("/mcp", mount_mcp())
+    mcp_app = mount_mcp()
+    app.state.mcp_app = mcp_app
+    app.mount("/mcp", mcp_app)
 
     static_dir = BASE_DIR / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
