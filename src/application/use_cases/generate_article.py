@@ -218,8 +218,17 @@ class GenerateArticleUseCase:
                     images_count=images_count,
                 )
                 prompts_raw = await self._kie.generate_completion([{"role": "user", "content": img_prompt_req}])
-                clean_json = prompts_raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-                image_configs = json.loads(clean_json)[:images_count]
+
+                json_match = re.search(r"\[\s*\{.*\}\s*\]", prompts_raw or "", re.DOTALL)
+                if json_match:
+                    image_configs = json.loads(json_match.group(0))[:images_count]
+                else:
+                    image_configs = [
+                        {
+                            "prompt": f"Commercial 4K photography, specialist with {company_name} logo on uniform, {topic}, photorealistic",
+                            "alt": topic, "caption": ""}
+                        for _ in range(images_count)
+                    ]
 
                 async def generate_single(idx: int, item: dict[str, str]):
                     try:
