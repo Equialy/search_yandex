@@ -55,14 +55,14 @@ class KieApiGateway:
     async def generate_completion_with_reasoning(
             self,
             messages: list[dict[str, Any]],
-            reasoning_effort: str ,
+            reasoning_effort: str = "low",
     ) -> tuple[str, str]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json"
         }
 
-        effort = "low" if reasoning_effort.lower() == "low" else "high"
+        effort = "low" if str(reasoning_effort).lower() == "low" else "high"
 
         payload = {
             "messages": self._format_messages_for_gpt52(messages),
@@ -79,25 +79,40 @@ class KieApiGateway:
 
                 if response.status_code == 200:
                     data = response.json()
-                    choices = data.get("choices", [])
-                    if not choices:
-                        raise ValueError(f"Пустой choices в ответе KIE.AI ({url}): {data}")
 
-                    msg_obj = choices[0].get("message", {})
-                    content = msg_obj.get("content") or ""
-                    reasoning = msg_obj.get("reasoning_content") or msg_obj.get("reasoning") or ""
-                    return content.strip(), reasoning.strip()
+                    if data.get("code") and data.get("code") != 200:
+                        last_error_text = str(data)
+                        print(
+                            f" [KIE.AI Retry #{attempt}/{max_retries}]: Внутренняя ошибка KIE (code={data.get('code')}). Ждем {2.0 * attempt}с...")
+                        await asyncio.sleep(2.0 * attempt)
+                        continue
+
+                    choices = data.get("choices")
+                    if choices and len(choices) > 0:
+                        msg_obj = choices[0].get("message", {})
+                        content = msg_obj.get("content") or ""
+                        reasoning = msg_obj.get("reasoning_content") or msg_obj.get("reasoning") or ""
+                        if content:
+                            return content.strip(), reasoning.strip()
+
+                    last_error_text = str(data)
+                    print(
+                        f"️ [KIE.AI Retry #{attempt}/{max_retries}]: Пустой choices/content в ответе. Ждем {2.0 * attempt}с...")
+                    await asyncio.sleep(2.0 * attempt)
+                    continue
 
                 if response.status_code in (500, 502, 503, 504, 429):
                     last_error_text = response.text
-                    print(f"⚠️ [KIE.AI GPT-5.2 Retry #{attempt}/{max_retries}]: Статус {response.status_code}. Ждем 2с...")
+                    print(
+                        f" [KIE.AI Retry #{attempt}/{max_retries}]: HTTP {response.status_code}. Ждем {2.0 * attempt}с...")
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
                 raise ValueError(f"Ошибка KIE.AI GPT-5.2 ({response.status_code}): {response.text}")
 
             except httpx.RequestError as req_err:
-                print(f"⚠️ [KIE.AI Network Retry #{attempt}/{max_retries}]: {req_err}")
+                last_error_text = str(req_err)
+                print(f" [KIE.AI Network Retry #{attempt}/{max_retries}]: {req_err}")
                 await asyncio.sleep(2.0 * attempt)
 
         raise ValueError(f"Ошибка KIE.AI GPT-5.2 после {max_retries} попыток: {last_error_text}")
