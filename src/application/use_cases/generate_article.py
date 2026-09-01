@@ -25,7 +25,8 @@ from src.infrastructure.gateways.image_kie_gateway import \
     ImageKieGenerationGateway
 from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
-from src.utils.extract_data import remove_meta_block_from_html, convert_svg_to_png_bytes, normalize_logo_png
+from src.utils.extract_data import remove_meta_block_from_html, convert_svg_to_png_bytes, normalize_logo_png, \
+    extract_html_metadata
 
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,9 @@ class GenerateArticleResult:
     target_site: str | None
     target_site_parse: dict[str, Any] | None
     images_urls: list[str] | None = None
+    meta_title: str = ""
+    meta_description: str = ""
+    meta_h1: str = ""
 
 
 def save_article_to_html(article: Article) -> Path:
@@ -176,6 +180,7 @@ class GenerateArticleUseCase:
                 user_prompt=prompt
             )
             content = normalize_article_html(content)
+            h1_val, title_val, desc_val = extract_html_metadata(content, topic)
             content = remove_meta_block_from_html(content)
 
             # 3. Расчет SEO-метрик
@@ -274,4 +279,7 @@ class GenerateArticleUseCase:
                 target_site=target_site or None,
                 target_site_parse=target_site_parse,
                 images_urls=[img["url"] for img in generated_images],
+                meta_title=title_val,
+                meta_description=desc_val,
+                meta_h1=h1_val,
             )

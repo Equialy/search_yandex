@@ -165,8 +165,9 @@ async def generate_reports_article_pipeline_task(
         )
 
         article = gen_result.article
-        h1_val, title_val, desc_val = extract_html_metadata(article.content, final_topic)
-
+        title_val = gen_result.meta_title or final_topic
+        desc_val = gen_result.meta_description
+        h1_val = gen_result.meta_h1 or final_topic
         clean_html_content = remove_meta_block_from_html(article.content)
 
         metrics = article.seo_metrics or {}
