@@ -1,4 +1,4 @@
-import json
+import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -9,9 +9,12 @@ from src.utils.extract_data import _extract_logo_url
 
 try:
     from curl_cffi.requests import AsyncSession
+
     CURL_CFFI_AVAILABLE = True
 except ImportError:
     CURL_CFFI_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 _BEGET_CHALLENGE_MARKERS = ("beget=begetok", "set_cookie()", "location.reload()")
 
@@ -19,34 +22,42 @@ _NAV_CHROME_TAGS = frozenset({
     "nav", "header", "footer", "aside", "form", "button",
     "script", "style", "noscript", "svg", "iframe", "dialog"
 })
+
 _NAV_ROLES = frozenset({"navigation", "banner", "contentinfo", "menubar", "dialog"})
+
 _NAV_CLASS_PATTERN = re.compile(
-    r"(?:^|[\s_-])(?:nav|navbar|menu|megamenu|breadcrumb|topbar|sidebar|site-nav|header-menu|footer|modal|popup|cookie|policy)(?:$|[\s_-])",
+    r"(?:^|[\s_-])(?:navbar|site-header|header-menu|footer|cookie-banner|cookie-popup|cookie-notice)(?:$|[\s_-])",
     re.I,
 )
+
 _GARBAGE_TEXT_PATTERN = re.compile(
-    r"^(?:подробнее|отправить заявку|перезвоните мне|согласен на обработку|политика конфиденциальности|\+?\d[\d\s\-\(\)]{8,}\d)$",
+    r"^(?:подробнее|отправить заявку|перезвоните мне|согласен на обработку|политика конфиденциальности|заказать звонок|\+?\d[\d\s\-\(\)]{8,}\d)$",
     re.I
 )
 
+_TILDA_TEXT_CLASSES = frozenset({
+    "tn-atom", "t-descr", "t-text", "t-title", "t-name", "t-card__descr", "t-card__text"
+})
+
 
 def _is_beget_challenge(html: str) -> bool:
+    """Проверяет, вернул ли хостинг Beget антибот-заглушку вместо сайта."""
     if not html or len(html) > 5000:
         return False
     lowered = html.lower()
-    return all(marker.lower() in lowered for marker in _BEGET_CHALLENGE_MARKERS)
+    return all(marker in lowered for marker in _BEGET_CHALLENGE_MARKERS)
 
 
-def _prepare_content_root(soup: BeautifulSoup) -> Any:
-    """Очищает DOM от шапок, подвалов, форм, модалок и cookie-баннеров."""
-    content = BeautifulSoup(str(soup), "html.parser")
-
+def _clean_dom(soup: BeautifulSoup) -> Tag:
+    """Очищает DOM-дерево от мусорных тегов, шапок, подвалов и cookie-плашек."""
+    # 1. Удаляем технические и сквозные теги
     for tag_name in _NAV_CHROME_TAGS:
-        for tag in content.find_all(tag_name):
+        for tag in soup.find_all(tag_name):
             if isinstance(tag, Tag):
                 tag.decompose()
 
-    for tag in content.find_all(True):
+    # 2. Удаляем элементы по ролям и специфичным классам навигации/куки
+    for tag in soup.find_all(True):
         if not isinstance(tag, Tag) or not isinstance(tag.attrs, dict):
             continue
 
@@ -56,39 +67,24 @@ def _prepare_content_root(soup: BeautifulSoup) -> Any:
             continue
 
         classes = tag.attrs.get("class", [])
-        if isinstance(classes, list):
-            class_str = " ".join(classes)
-        else:
-            class_str = str(classes)
-
+        class_str = " ".join(classes) if isinstance(classes, list) else str(classes)
         if class_str and _NAV_CLASS_PATTERN.search(class_str):
             tag.decompose()
             continue
 
-        tag_id = str(tag.attrs.get("id", ""))
-        if tag_id and _NAV_CLASS_PATTERN.search(tag_id):
-            tag.decompose()
-            continue
+    body = soup.find("body")
+    return body if isinstance(body, Tag) else soup
 
-    def _is_main_role(t: Any) -> bool:
-        return isinstance(t, Tag) and isinstance(t.attrs, dict) and t.attrs.get("role") == "main"
-
-    main = (
-            content.find("main")
-            or content.find("article")
-            or content.find(_is_main_role)
-    )
-    return main or content.find("body") or content
 
 class SiteParserGateway:
-    def __init__(self, http_client: httpx.AsyncClient ):
+    def __init__(self, http_client: httpx.AsyncClient):
         self._client = http_client
 
     async def parse_site_to_graph(
-        self,
-        url: str,
-        fallback_title: str = "",
-        fallback_desc: str = ""
+            self,
+            url: str,
+            fallback_title: str = "",
+            fallback_desc: str = ""
     ) -> dict[str, Any]:
         parsed_url = urlparse(url)
         domain = parsed_url.netloc or url
@@ -96,15 +92,17 @@ class SiteParserGateway:
         try:
             html_text = await self._fetch_html(url)
 
+            # 1. Проверка и обход Beget Challenge
             if _is_beget_challenge(html_text):
-                print(f"[SiteParserGateway]: Beget challenge detected for {url}, retrying with cookie...")
+                logger.info(f"[SiteParserGateway] Обнаружен Beget challenge для {url}, повторный запрос с кукой...")
                 html_text = await self._fetch_html(url, cookies={"beget": "begetok"})
 
             if html_text:
                 soup = BeautifulSoup(html_text, "html.parser")
 
+                # 2. Извлекаем логотип и мета-данные ДО очистки DOM
                 logo_url = _extract_logo_url(soup, url)
-                print(f"[SiteParserGateway] Extracted logo for {url} -> {logo_url}")
+                logger.debug(f"[SiteParserGateway] Извлечен логотип для {url} -> {logo_url}")
 
                 title = ""
                 if soup.title and hasattr(soup.title, "get_text"):
@@ -121,9 +119,9 @@ class SiteParserGateway:
 
                 meta_desc = ""
                 meta_tag = (
-                    soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
-                    or soup.find("meta", attrs={"property": re.compile(r"description$", re.I)})
-                    or soup.find("meta", attrs={"itemprop": re.compile(r"description$", re.I)})
+                        soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
+                        or soup.find("meta", attrs={"property": re.compile(r"description$", re.I)})
+                        or soup.find("meta", attrs={"itemprop": re.compile(r"description$", re.I)})
                 )
                 if isinstance(meta_tag, Tag):
                     val = meta_tag.get("content")
@@ -132,8 +130,10 @@ class SiteParserGateway:
 
                 final_desc = meta_desc or fallback_desc or ""
 
-                content_root = _prepare_content_root(soup)
+                # 3. Очищаем DOM на месте без повторного создания объекта BeautifulSoup
+                content_root = _clean_dom(soup)
 
+                # 4. Извлечение структуры заголовков (H1–H4)
                 headings = []
                 for h in content_root.find_all(["h1", "h2", "h3", "h4"]):
                     if isinstance(h, Tag):
@@ -141,7 +141,7 @@ class SiteParserGateway:
                         if h_text and len(h_text) > 3:
                             headings.append({"level": h.name.upper(), "text": h_text})
 
-                # 4. Таблицы с правильной Markdown-разметкой
+                # 5. Таблицы в Markdown
                 tables_markdown = []
                 for table in content_root.find_all("table")[:6]:
                     if not isinstance(table, Tag):
@@ -151,7 +151,8 @@ class SiteParserGateway:
                     for tr_idx, tr in enumerate(table.find_all("tr")[:20]):
                         if not isinstance(tr, Tag):
                             continue
-                        cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"]) if isinstance(td, Tag)]
+                        cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"]) if
+                                 isinstance(td, Tag)]
                         if cells and any(c for c in cells):
                             rows.append(" | ".join(cells))
                             if tr_idx == 0:
@@ -160,28 +161,41 @@ class SiteParserGateway:
                     if rows:
                         tables_markdown.append("\n".join(rows))
 
-                # 5. FAQ Аккордеоны
+                # 6. FAQ Аккордеоны
                 faq_blocks = []
                 for details in content_root.find_all(
-                    ["details", "div"],
-                    class_=re.compile(r"faq|accordion|question|reply|answer", re.I),
-                )[:6]:
+                        ["details", "div"],
+                        class_=re.compile(r"faq|accordion|question|reply|answer", re.I),
+                )[:8]:
                     if isinstance(details, Tag):
                         q_text = details.get_text(" ", strip=True)
-                        if len(q_text) > 20 and q_text not in faq_blocks:
+                        if len(q_text) > 15 and q_text not in faq_blocks:
                             faq_blocks.append(q_text)
 
-                # 6. Извлечение чистого текста по абзацам
+                # 7. Извлечение чистого текста (стандартные теги + Tilda/Zero blocks + листовые div)
                 paragraphs = []
-                for elem in content_root.find_all(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "span"]):
+                for elem in content_root.find_all(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span"]):
                     if isinstance(elem, Tag):
+                        # Для div берем либо тильдовские текстовые классы, либо блоки без вложенных p/div
+                        if elem.name == "div":
+                            classes = " ".join(elem.attrs.get("class", []))
+                            is_text_div = any(c in classes for c in _TILDA_TEXT_CLASSES)
+                            has_no_nested_blocks = not elem.find(["p", "div"])
+                            if not (is_text_div or has_no_nested_blocks):
+                                continue
+
                         text = elem.get_text(" ", strip=True)
-                        if len(text) > 25 and not _GARBAGE_TEXT_PATTERN.match(text):
+
+                        # Порог в 12 символов сохраняет важные короткие буллеты и факты
+                        if len(text) >= 12 and not _GARBAGE_TEXT_PATTERN.match(text):
                             if not paragraphs or paragraphs[-1] != text:
-                                paragraphs.append(text)
+                                # Исключаем дублирование вложенного и родительского текста
+                                if not any(text in p for p in paragraphs[-3:]):
+                                    paragraphs.append(text)
 
                 clean_text_paragraphs = "\n\n".join(paragraphs)
 
+                # 8. Формируем структурированный Markdown-отчет для LLM
                 md_report = [
                     f"### Title:\n{final_title}\n",
                     f"### Description:\n{final_desc}\n" if final_desc else "",
@@ -225,10 +239,9 @@ class SiteParserGateway:
                 }
 
         except Exception as e:
-            import traceback
-            print(f"[SiteParserGateway Exception for {url}]: {type(e).__name__} - {e}")
-            traceback.print_exc()
+            logger.exception(f"[SiteParserGateway Error for {url}]: {e}")
 
+        # Безопасный Fallback при сбое
         real_title = fallback_title or f"Сайт {domain}"
         real_desc = fallback_desc or f"Страница {domain}"
 
@@ -262,7 +275,7 @@ class SiteParserGateway:
                     if res.status_code == 200:
                         html_text = res.text
             except Exception as e:
-                print(f"[curl_cffi Warning for {url}]: {e}")
+                logger.debug(f"[curl_cffi Warning for {url}]: {e}")
 
         if not html_text and hasattr(self._client, "get"):
             try:
@@ -270,6 +283,6 @@ class SiteParserGateway:
                 if res.status_code == 200:
                     html_text = res.text
             except Exception as e:
-                print(f"[httpx Warning for {url}]: {e}")
+                logger.debug(f"[httpx Warning for {url}]: {e}")
 
         return html_text

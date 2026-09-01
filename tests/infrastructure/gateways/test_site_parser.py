@@ -1,16 +1,13 @@
 from unittest.mock import AsyncMock, patch
-
 import httpx
 from bs4 import BeautifulSoup
 import pytest
 
-
 from src.infrastructure.gateways.site_parser import (
     SiteParserGateway,
     _is_beget_challenge,
-    _prepare_content_root,
+    _clean_dom,  # <-- Обновленный импорт
 )
-
 
 
 def test_is_beget_challenge(beget_challenge_html, sample_landing_html):
@@ -20,8 +17,8 @@ def test_is_beget_challenge(beget_challenge_html, sample_landing_html):
     assert _is_beget_challenge("") is False
 
 
-def test_prepare_content_root_strips_noise():
-    """Проверка, что навигация, cookie и формы вырезаются, а main остается."""
+def test_clean_dom_strips_noise():
+    """Проверка, что навигация, cookie и формы вырезаются, а main/body остается."""
     raw_html = """
     <html>
         <body>
@@ -35,17 +32,15 @@ def test_prepare_content_root_strips_noise():
         </body>
     </html>
     """
-    soup = BeautifulSoup(raw_html, 'html.parser')
-    content_root = _prepare_content_root(soup)
-    text = content_root.get_text(' ', strip=True)
+    soup = BeautifulSoup(raw_html, "html.parser")
+    content_root = _clean_dom(soup)
+    text = content_root.get_text(" ", strip=True)
 
-    assert 'Заголовок внутри Main' in text
-    assert 'Основной смысловой текст' in text
-    assert 'Шапка сайта' not in text
-    assert 'Куки-баннер' not in text
-    assert 'Подвал' not in text
-
-
+    assert "Заголовок внутри Main" in text
+    assert "Основной смысловой текст" in text
+    assert "Шапка сайта" not in text
+    assert "Куки-баннер" not in text
+    assert "Подвал" not in text
 
 # -------------------------------------------------------------
 # ТЕСТЫ ПАРСИНГА САЙТА (parse_site_to_graph)
@@ -53,7 +48,7 @@ def test_prepare_content_root_strips_noise():
 
 @pytest.mark.asyncio
 async def test_live_parse_site():
-    target_url = "https://knopka.com/"
+    target_url = "https://intekh33.ru/uslugi/videonablyudenie"
 
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         parser = SiteParserGateway(http_client=client)
@@ -79,7 +74,6 @@ async def test_live_parse_site():
     print(f"\nЧИСТЫЙ ТЕКСТ :\n{result['clean_text']}...")
     print("=" * 60)
 
-    # 5. Автоматические проверки (Assertions)
     assert result["is_blocked"] is False, "Сайт заблокировал запрос или упал с ошибкой"
     assert len(result["title"]) > 5, "Заголовок страницы (title) не должен быть пустым"
     assert len(result["content_structure"]["headings"]) > 0, "Должен быть найден хотя бы один заголовок"

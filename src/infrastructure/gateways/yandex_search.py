@@ -4,7 +4,7 @@ import logging
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 import httpx
-from config.settings import settings
+from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class FormatTypeEnum(str, enum.Enum):
     HTML = "FORMAT_HTML"
 
 
-class YandexSearch:
+class YandexSearchGateway:
     def __init__(self, http_client: httpx.AsyncClient):
         self._httpx_client = http_client
         self.api_key_yandex = settings.YANDEX_API_KEY
@@ -63,7 +63,7 @@ class YandexSearch:
         except Exception:
             return False
 
-    async def get_search_by_key(self, query: str, limit: int = 5) -> list[dict[str, str]]:
+    async def search(self, query: str, limit: int = 5) -> list[dict[str, str]]:
         headers = {
             "Authorization": f"Api-Key {self.api_key_yandex}",
             "Content-Type": "application/json",
