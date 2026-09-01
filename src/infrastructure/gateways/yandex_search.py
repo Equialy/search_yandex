@@ -1,13 +1,14 @@
-# src/infrastructure/gateways/yandex_search.py
-
 import base64
-import re
+import enum
+import logging
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 import httpx
-from src.config.settings import settings
+from config.settings import settings
 
-AGGREGATOR_DOMAINS = {
+logger = logging.getLogger(__name__)
+
+AGGREGATOR_DOMAINS = frozenset({
     "ozon.ru", "www.ozon.ru",
     "wildberries.ru", "www.wildberries.ru",
     "vseinstrumenti.ru", "www.vseinstrumenti.ru",
@@ -34,113 +35,96 @@ AGGREGATOR_DOMAINS = {
     "otzovik.com", "irecommend.ru",
     "hh.ru", "superjob.ru", "rabota.ru",
     "cian.ru", "domclick.ru", "realty.yandex.ru"
-}
+})
 
 
-class YandexSearchGateway:
+class SearchTypeEnum(str, enum.Enum):
+    RU = "SEARCH_TYPE_RU"
+
+
+class FormatTypeEnum(str, enum.Enum):
+    XML = "FORMAT_XML"
+    HTML = "FORMAT_HTML"
+
+
+class YandexSearch:
     def __init__(self, http_client: httpx.AsyncClient):
-        self._client = http_client
-        self._api_key = settings.YANDEX_API_KEY
-        self._folder_id = settings.YANDEX_FOLDER_ID
-        self._v2_url = "https://searchapi.api.cloud.yandex.net/v2/web/search"
-
-    @staticmethod
-    def _clean_tags(text: str) -> str:
-        return re.sub(r'<[^>]+>', '', text).strip()
+        self._httpx_client = http_client
+        self.api_key_yandex = settings.YANDEX_API_KEY
+        self.folder_id_yandex = settings.YANDEX_FOLDER_ID
+        self._v2_url_yandex = "https://searchapi.api.cloud.yandex.net/v2/web/search"
 
     @staticmethod
     def _is_aggregator(url: str) -> bool:
-        """Проверяет, является ли сайт маркетплейсом, агрегатором услуг или справочником."""
+        """Проверяет, является ли домен маркетплейсом или каталогом."""
         try:
-            url_lower = url.lower()
-            domain = urlparse(url_lower).netloc
-            return any(agg in domain or agg in url_lower for agg in AGGREGATOR_DOMAINS)
+            domain = urlparse(url.lower()).netloc
+            return any(agg in domain for agg in AGGREGATOR_DOMAINS)
         except Exception:
             return False
 
-    async def search(self, query: str, limit: int = 5) -> list[dict[str, str]]:
-        fallback_results = [
-            {
-                "url": "https://ru.wikipedia.org/wiki/Эспрессо",
-                "title": "Эспрессо — Википедия",
-                "description": "Эспрессо — напиток из кофе."
-            }
-        ][:limit]
-
-        if not self._api_key or self._api_key == "YOUR_YANDEX_API_KEY":
-            return fallback_results
-
+    async def get_search_by_key(self, query: str, limit: int = 5) -> list[dict[str, str]]:
         headers = {
-            "Authorization": f"Api-Key {self._api_key}",
+            "Authorization": f"Api-Key {self.api_key_yandex}",
             "Content-Type": "application/json",
             "User-Agent": "Mozilla/5.0"
         }
 
         payload = {
-            "folderId": self._folder_id,
+            "folderId": self.folder_id_yandex,
             "query": {
-                "searchType": "SEARCH_TYPE_RU",
-                "queryText": query
+                "searchType": SearchTypeEnum.RU.value,
+                "queryText": query,
             },
             "groupSpec": {
-                "groupsOnPage": limit + 10
-            }
+                "groupsOnPage": limit + 15,
+                "groupMode": "GROUP_MODE_FLAT"
+            },
+            "responseFormat": FormatTypeEnum.XML.value,
         }
 
         try:
-            response = await self._client.post(
-                self._v2_url,
-                json=payload,
+            response = await self._httpx_client.post(
+                url=self._v2_url_yandex,
                 headers=headers,
-                timeout=12.0
+                timeout=15.0,
+                json=payload
             )
+            response.raise_for_status()
 
-            if response.status_code == 200:
-                data = response.json()
-                results: list[dict[str, str]] = []
+            raw_base64 = response.json().get("rawData", "")
+            if not raw_base64:
+                return []
 
-                if "rawData" in data and data["rawData"]:
-                    xml_bytes = base64.b64decode(data["rawData"])
-                    xml_str = xml_bytes.decode("utf-8")
-                    root = ET.fromstring(xml_str)
+            xml_string = base64.b64decode(raw_base64).decode("utf-8", errors="ignore")
+            root = ET.fromstring(xml_string)
 
-                    for doc in root.findall(".//doc"):
-                        url_node = doc.find("url")
-                        title_node = doc.find("title")
-                        passage_node = doc.find(".//passage")
+            results = []
+            for doc in root.findall(".//doc"):
+                url_node = doc.find("url")
+                title_node = doc.find("title")
+                passage_node = doc.find(".//passage")
 
-                        url_text = url_node.text if url_node is not None and url_node.text else ""
+                url = url_node.text.strip() if (url_node is not None and url_node.text) else ""
 
-                        if not url_text or self._is_aggregator(url_text):
-                            print(f"[YandexSearchGateway Skipping Aggregator/Directory]: {url_text}")
-                            continue
+                if not url or self._is_aggregator(url):
+                    continue
 
-                        title_text = ""
-                        if title_node is not None:
-                            title_raw = ET.tostring(title_node, encoding="utf-8").decode("utf-8")
-                            title_text = self._clean_tags(title_raw)
+                title = "".join(title_node.itertext()).strip() if title_node is not None else url
+                description = "".join(passage_node.itertext()).strip() if passage_node is not None else ""
 
-                        desc_text = ""
-                        if passage_node is not None:
-                            desc_raw = ET.tostring(passage_node, encoding="utf-8").decode("utf-8")
-                            desc_text = self._clean_tags(desc_raw)
+                results.append({
+                    "url": url,
+                    "title": title,
+                    "description": description
+                })
 
-                        results.append({
-                            "url": url_text,
-                            "title": title_text or url_text,
-                            "description": desc_text
-                        })
+                if len(results) >= limit:
+                    break
 
-                if results:
-                    filtered_results = results[:limit]
-                    print(f"\n[YandexSearchGateway V2 Success]: По запросу '{query}' отобран список из {len(filtered_results)} РЕАЛЬНЫХ КОМПАНИЙ (агрегаторы, 2ГИС и Яндекс Услуги отфильтрованы):")
-                    for idx, res in enumerate(filtered_results, 1):
-                        print(f"  {idx}. {res['url']}")
-                    print()
-                    return filtered_results
-
-            return fallback_results
+            logger.info(f"YandexSearch: найдено {len(results)} реальных сайтов по ключу '{query}'")
+            return results
 
         except Exception as e:
-            print(f"[YandexSearchGateway Error]: {type(e).__name__} - {e}")
-            return fallback_results
+            logger.error(f"YandexSearch error: {e}")
+            raise e

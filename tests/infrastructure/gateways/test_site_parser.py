@@ -53,7 +53,7 @@ def test_prepare_content_root_strips_noise():
 
 @pytest.mark.asyncio
 async def test_live_parse_site():
-    target_url = "https://prostogroup.com/sajt-vizitka/"
+    target_url = "https://knopka.com/"
 
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         parser = SiteParserGateway(http_client=client)
