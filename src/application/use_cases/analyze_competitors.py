@@ -93,6 +93,10 @@ class AnalyzeCompetitorsUseCase:
                     fallback_desc=yandex_desc
                 )
 
+                raw_chars = len(parsed_site.get("body_text") or "")
+                clean_chars = len(parsed_site.get("clean_text") or "")
+                print(f"  [{idx}/{len(search_items)}] Спарсено символов: {raw_chars} (чистый текст: {clean_chars})")
+
                 if not parsed_site or parsed_site.get("is_blocked") or len(parsed_site.get("body_text", "")) < 150:
                     print(f"   [{idx}/{len(search_items)}] Пропущен маркетплейс / заблокированный сайт: {site_url}")
                     continue
