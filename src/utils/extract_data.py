@@ -25,11 +25,11 @@ def extract_html_metadata(html_content: str, fallback_title: str) -> tuple[str, 
     if h1_match:
         h1_text = re.sub(r"<[^>]+>", "", h1_match.group(1)).strip()
 
-    title_match = re.search(r"<strong>Title:</strong>\s*(.*?)</p>", html_content, flags=re.IGNORECASE | re.DOTALL)
+    title_match = re.search(r"(?:<strong>|<b>)?Title:?(?:</strong>|</b>)?\s*(.*?)(?:</p>|</div>|\n)", html_content, flags=re.IGNORECASE | re.DOTALL)
     if title_match:
         title_text = re.sub(r"<[^>]+>", "", title_match.group(1)).strip()
 
-    desc_match = re.search(r"<strong>Description:</strong>\s*(.*?)</p>", html_content, flags=re.IGNORECASE | re.DOTALL)
+    desc_match = re.search(r"(?:<strong>|<b>)?Description:?(?:</strong>|</b>)?\s*(.*?)(?:</p>|</div>|\n)", html_content, flags=re.IGNORECASE | re.DOTALL)
     if desc_match:
         desc_text = re.sub(r"<[^>]+>", "", desc_match.group(1)).strip()
 
