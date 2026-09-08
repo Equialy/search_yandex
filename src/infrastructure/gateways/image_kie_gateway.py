@@ -67,7 +67,7 @@ class ImageKieGenerationGateway:
             raise ValueError(f"Task creation failed: {res.text}")
 
         result_img_url = None
-        for _ in range(45):
+        for _ in range(90):
             await asyncio.sleep(2.0)
             poll_res = await self._http.get(
                 f"{self._base_url}/api/v1/jobs/recordInfo",
