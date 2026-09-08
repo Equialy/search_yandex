@@ -16,6 +16,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+_NON_HTML_EXTENSIONS = frozenset({
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".zip", ".rar", ".7z", ".tar", ".gz",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico",
+    ".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav"
+})
+
 _BEGET_CHALLENGE_MARKERS = ("beget=begetok", "set_cookie()", "location.reload()")
 
 _NAV_CHROME_TAGS = frozenset({
@@ -40,8 +47,13 @@ _TILDA_TEXT_CLASSES = frozenset({
 })
 
 
+def _is_scrapeable_url(url: str) -> bool:
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    return not any(path.endswith(ext) for ext in _NON_HTML_EXTENSIONS)
+
+
 def _is_beget_challenge(html: str) -> bool:
-    """Проверяет, вернул ли хостинг Beget антибот-заглушку вместо сайта."""
     if not html or len(html) > 5000:
         return False
     lowered = html.lower()
@@ -49,14 +61,11 @@ def _is_beget_challenge(html: str) -> bool:
 
 
 def _clean_dom(soup: BeautifulSoup) -> Tag:
-    """Очищает DOM-дерево от мусорных тегов, шапок, подвалов и cookie-плашек."""
-    # 1. Удаляем технические и сквозные теги
     for tag_name in _NAV_CHROME_TAGS:
         for tag in soup.find_all(tag_name):
             if isinstance(tag, Tag):
                 tag.decompose()
 
-    # 2. Удаляем элементы по ролям и специфичным классам навигации/куки
     for tag in soup.find_all(True):
         if not isinstance(tag, Tag) or not isinstance(tag.attrs, dict):
             continue
@@ -88,21 +97,34 @@ class SiteParserGateway:
     ) -> dict[str, Any]:
         parsed_url = urlparse(url)
         domain = parsed_url.netloc or url
+        real_title = fallback_title or f"Сайт {domain}"
+        real_desc = fallback_desc or f"Страница {domain}"
+
+        if not _is_scrapeable_url(url):
+            logger.info(f"[SiteParserGateway] Пропуск не-HTML ссылки (файл): {url}")
+            return {
+                "url": url,
+                "title": real_title,
+                "description": real_desc,
+                "logo_url": None,
+                "seo_meta": {"title": real_title, "description": real_desc},
+                "content_structure": {"headings": [], "tables": [], "faq_blocks": []},
+                "body_text": "",
+                "clean_text": "",
+                "is_blocked": True
+            }
 
         try:
             html_text = await self._fetch_html(url)
 
-            # 1. Проверка и обход Beget Challenge
             if _is_beget_challenge(html_text):
-                logger.info(f"[SiteParserGateway] Обнаружен Beget challenge для {url}, повторный запрос с кукой...")
+                logger.info(f"[SiteParserGateway] Beget challenge для {url}, повторный запрос с кукой...")
                 html_text = await self._fetch_html(url, cookies={"beget": "begetok"})
 
             if html_text:
                 soup = BeautifulSoup(html_text, "html.parser")
 
-                # 2. Извлекаем логотип и мета-данные ДО очистки DOM
                 logo_url = _extract_logo_url(soup, url)
-                logger.debug(f"[SiteParserGateway] Извлечен логотип для {url} -> {logo_url}")
 
                 title = ""
                 if soup.title and hasattr(soup.title, "get_text"):
@@ -115,7 +137,7 @@ class SiteParserGateway:
                         if val and isinstance(val, str):
                             title = val.strip()
 
-                final_title = title or fallback_title or domain
+                final_title = title or real_title
 
                 meta_desc = ""
                 meta_tag = (
@@ -130,10 +152,8 @@ class SiteParserGateway:
 
                 final_desc = meta_desc or fallback_desc or ""
 
-                # 3. Очищаем DOM на месте без повторного создания объекта BeautifulSoup
                 content_root = _clean_dom(soup)
 
-                # 4. Извлечение структуры заголовков (H1–H4)
                 headings = []
                 for h in content_root.find_all(["h1", "h2", "h3", "h4"]):
                     if isinstance(h, Tag):
@@ -141,7 +161,6 @@ class SiteParserGateway:
                         if h_text and len(h_text) > 3:
                             headings.append({"level": h.name.upper(), "text": h_text})
 
-                # 5. Таблицы в Markdown
                 tables_markdown = []
                 for table in content_root.find_all("table")[:6]:
                     if not isinstance(table, Tag):
@@ -151,8 +170,7 @@ class SiteParserGateway:
                     for tr_idx, tr in enumerate(table.find_all("tr")[:20]):
                         if not isinstance(tr, Tag):
                             continue
-                        cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"]) if
-                                 isinstance(td, Tag)]
+                        cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"]) if isinstance(td, Tag)]
                         if cells and any(c for c in cells):
                             rows.append(" | ".join(cells))
                             if tr_idx == 0:
@@ -161,7 +179,6 @@ class SiteParserGateway:
                     if rows:
                         tables_markdown.append("\n".join(rows))
 
-                # 6. FAQ Аккордеоны
                 faq_blocks = []
                 for details in content_root.find_all(
                         ["details", "div"],
@@ -172,11 +189,9 @@ class SiteParserGateway:
                         if len(q_text) > 15 and q_text not in faq_blocks:
                             faq_blocks.append(q_text)
 
-                # 7. Извлечение чистого текста (стандартные теги + Tilda/Zero blocks + листовые div)
                 paragraphs = []
                 for elem in content_root.find_all(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span"]):
                     if isinstance(elem, Tag):
-                        # Для div берем либо тильдовские текстовые классы, либо блоки без вложенных p/div
                         if elem.name == "div":
                             classes = " ".join(elem.attrs.get("class", []))
                             is_text_div = any(c in classes for c in _TILDA_TEXT_CLASSES)
@@ -185,24 +200,20 @@ class SiteParserGateway:
                                 continue
 
                         text = elem.get_text(" ", strip=True)
-
-                        # Порог в 12 символов сохраняет важные короткие буллеты и факты
                         if len(text) >= 12 and not _GARBAGE_TEXT_PATTERN.match(text):
                             if not paragraphs or paragraphs[-1] != text:
-                                # Исключаем дублирование вложенного и родительского текста
                                 if not any(text in p for p in paragraphs[-3:]):
                                     paragraphs.append(text)
 
                 clean_text_paragraphs = "\n\n".join(paragraphs)
 
-                # 8. Формируем структурированный Markdown-отчет для LLM
                 md_report = [
                     f"### Title:\n{final_title}\n",
                     f"### Description:\n{final_desc}\n" if final_desc else "",
                 ]
 
                 if headings:
-                    md_report.append("### 🏷 Структура заголовков (H1–H4):")
+                    md_report.append("### Структура заголовков (H1–H4):")
                     for h in headings:
                         md_report.append(f"- **[{h['level']}]** {h['text']}")
                     md_report.append("")
@@ -214,7 +225,7 @@ class SiteParserGateway:
                         md_report.append("")
 
                 if clean_text_paragraphs:
-                    md_report.append("---\n###  Смысловой текст страницы:\n")
+                    md_report.append("---\n### Смысловой текст страницы:\n")
                     md_report.append(clean_text_paragraphs)
 
                 structured_raw_text = "\n".join(filter(None, md_report))
@@ -240,10 +251,6 @@ class SiteParserGateway:
 
         except Exception as e:
             logger.exception(f"[SiteParserGateway Error for {url}]: {e}")
-
-        # Безопасный Fallback при сбое
-        real_title = fallback_title or f"Сайт {domain}"
-        real_desc = fallback_desc or f"Страница {domain}"
 
         return {
             "url": url,
@@ -273,7 +280,9 @@ class SiteParserGateway:
                 async with AsyncSession(impersonate="chrome124") as session:
                     res = await session.get(url, timeout=15, allow_redirects=True, headers=headers, cookies=cookies)
                     if res.status_code == 200:
-                        html_text = res.text
+                        c_type = res.headers.get("content-type", "").lower()
+                        if "text/html" in c_type or "text/plain" in c_type or not c_type:
+                            html_text = res.text
             except Exception as e:
                 logger.debug(f"[curl_cffi Warning for {url}]: {e}")
 
@@ -281,7 +290,9 @@ class SiteParserGateway:
             try:
                 res = await self._client.get(url, timeout=12.0, headers=headers, cookies=cookies, follow_redirects=True)
                 if res.status_code == 200:
-                    html_text = res.text
+                    c_type = res.headers.get("content-type", "").lower()
+                    if "text/html" in c_type or "text/plain" in c_type or not c_type:
+                        html_text = res.text
             except Exception as e:
                 logger.debug(f"[httpx Warning for {url}]: {e}")
 

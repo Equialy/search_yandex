@@ -1,8 +1,18 @@
 import asyncio
+import re
 from typing import Any
 import httpx
 
 from src.config.settings import settings
+
+
+def _clean_text_for_llm(text: str, max_chars: int = 15000) -> str:
+    """Удаляет непечатаемые символы, null-байты и ограничивает длину текста."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 
 class KieApiGateway:
@@ -15,9 +25,6 @@ class KieApiGateway:
         self._endpoint = "/gpt-5-2/v1/chat/completions"
 
     def _format_messages_for_gpt52(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """
-        Преобразует сообщения в строгий формат KIE.AI GPT-5.2:
-        """
         formatted_messages = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -25,26 +32,24 @@ class KieApiGateway:
 
             formatted_content = []
             if isinstance(content, str):
-                formatted_content.append({"type": "text", "text": content})
+                clean_str = _clean_text_for_llm(content, max_chars=40000)
+                formatted_content.append({"type": "text", "text": clean_str})
             elif isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict):
                         if part.get("type") in ("text", "input_text"):
-                            formatted_content.append({"type": "text", "text": part.get("text", "")})
-                        # Картинка
+                            clean_str = _clean_text_for_llm(part.get("text", ""), max_chars=40000)
+                            formatted_content.append({"type": "text", "text": clean_str})
                         elif part.get("type") in ("image_url", "input_image"):
                             img_obj = part.get("image_url")
-                            if isinstance(img_obj, dict):
-                                img_url = img_obj.get("url", "")
-                            else:
-                                img_url = str(img_obj or "")
+                            img_url = img_obj.get("url", "") if isinstance(img_obj, dict) else str(img_obj or "")
                             formatted_content.append({"type": "image_url", "image_url": {"url": img_url}})
                         else:
                             formatted_content.append(part)
                     else:
-                        formatted_content.append({"type": "text", "text": str(part)})
+                        formatted_content.append({"type": "text", "text": _clean_text_for_llm(str(part))})
             else:
-                formatted_content.append({"type": "text", "text": str(content)})
+                formatted_content.append({"type": "text", "text": _clean_text_for_llm(str(content))})
 
             formatted_messages.append({
                 "role": role,
@@ -82,8 +87,7 @@ class KieApiGateway:
 
                     if data.get("code") and data.get("code") != 200:
                         last_error_text = str(data)
-                        print(
-                            f" [KIE.AI Retry #{attempt}/{max_retries}]: Внутренняя ошибка KIE (code={data.get('code')}). Ждем {2.0 * attempt}с...")
+                        print(f"[KIE.AI Retry #{attempt}/{max_retries}]: Code {data.get('code')}. Ждем {2.0 * attempt}с...")
                         await asyncio.sleep(2.0 * attempt)
                         continue
 
@@ -96,15 +100,13 @@ class KieApiGateway:
                             return content.strip(), reasoning.strip()
 
                     last_error_text = str(data)
-                    print(
-                        f"️ [KIE.AI Retry #{attempt}/{max_retries}]: Пустой choices/content в ответе. Ждем {2.0 * attempt}с...")
+                    print(f"[KIE.AI Retry #{attempt}/{max_retries}]: Пустой choices. Ждем {2.0 * attempt}с...")
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
                 if response.status_code in (500, 502, 503, 504, 429):
                     last_error_text = response.text
-                    print(
-                        f" [KIE.AI Retry #{attempt}/{max_retries}]: HTTP {response.status_code}. Ждем {2.0 * attempt}с...")
+                    print(f"[KIE.AI Retry #{attempt}/{max_retries}]: HTTP {response.status_code}. Ждем {2.0 * attempt}с...")
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
@@ -112,7 +114,7 @@ class KieApiGateway:
 
             except httpx.RequestError as req_err:
                 last_error_text = str(req_err)
-                print(f" [KIE.AI Network Retry #{attempt}/{max_retries}]: {req_err}")
+                print(f"[KIE.AI Network Retry #{attempt}/{max_retries}]: {req_err}")
                 await asyncio.sleep(2.0 * attempt)
 
         raise ValueError(f"Ошибка KIE.AI GPT-5.2 после {max_retries} попыток: {last_error_text}")
@@ -159,6 +161,9 @@ class KieApiGateway:
         tables_text = "\n---\n".join(struct.get('tables', [])) or "Нет таблиц"
         faq_text = "\n---\n".join(struct.get('faq_blocks', [])) or "Нет явных FAQ блоков"
 
+        raw_body = parsed_data.get('body_text', '')
+        clean_body = _clean_text_for_llm(raw_body, max_chars=12000)
+
         prompt = f"""
         Проведи глубокий коммерческий и LSA-анализ страницы конкурента {parsed_data.get('url')}:
 
@@ -176,7 +181,7 @@ class KieApiGateway:
         {faq_text}
 
         5. ОСНОВНОЙ ТЕКСТ (BODY):
-        {parsed_data.get('body_text', '')}
+        {clean_body}
 
         ЗАДАЧИ АНАЛИЗА ПО МЕТОДИЧКЕ:
         1. КОММЕРЧЕСКИЕ ФАКТОРЫ: точные цены, гарантии, условия, этапы.
