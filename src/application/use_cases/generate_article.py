@@ -133,7 +133,7 @@ class GenerateArticleUseCase:
 
             if competitor_lengths:
                 avg_chars = sum(competitor_lengths) // len(competitor_lengths)
-                target_chars = min(max(avg_chars, 5000), 12000)
+                target_chars = min(max(avg_chars, 5000), 20000)
                 min_chars = int(target_chars * 0.85)
                 max_chars = int(target_chars * 1.15)
                 
