@@ -12,6 +12,8 @@ def _clean_text_for_llm(text: str, max_chars: int = 15000) -> str:
         return ""
     cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]", " ", text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[:max_chars] + "\n...[текст обрезан для соблюдения лимитов контекста]"
     return cleaned
 
 
@@ -32,13 +34,13 @@ class KieApiGateway:
 
             formatted_content = []
             if isinstance(content, str):
-                clean_str = _clean_text_for_llm(content, max_chars=40000)
+                clean_str = _clean_text_for_llm(content, max_chars=25000)
                 formatted_content.append({"type": "text", "text": clean_str})
             elif isinstance(content, list):
                 for part in content:
                     if isinstance(part, dict):
                         if part.get("type") in ("text", "input_text"):
-                            clean_str = _clean_text_for_llm(part.get("text", ""), max_chars=40000)
+                            clean_str = _clean_text_for_llm(part.get("text", ""), max_chars=25000)
                             formatted_content.append({"type": "text", "text": clean_str})
                         elif part.get("type") in ("image_url", "input_image"):
                             img_obj = part.get("image_url")
@@ -47,9 +49,9 @@ class KieApiGateway:
                         else:
                             formatted_content.append(part)
                     else:
-                        formatted_content.append({"type": "text", "text": _clean_text_for_llm(str(part))})
+                        formatted_content.append({"type": "text", "text": _clean_text_for_llm(str(part), max_chars=25000)})
             else:
-                formatted_content.append({"type": "text", "text": _clean_text_for_llm(str(content))})
+                formatted_content.append({"type": "text", "text": _clean_text_for_llm(str(content), max_chars=25000)})
 
             formatted_messages.append({
                 "role": role,
@@ -135,7 +137,12 @@ class KieApiGateway:
             history: list[dict[str, Any]],
             user_prompt: str,
     ) -> tuple[str, str, list[dict[str, Any]]]:
-        updated_history = list(history)
+        system_msgs = [m for m in history if m.get("role") == "system"]
+        chat_msgs = [m for m in history if m.get("role") != "system"]
+        
+        trimmed_history = system_msgs + chat_msgs[-6:]
+
+        updated_history = list(trimmed_history)
         updated_history.append({"role": "user", "content": user_prompt})
 
         content, reasoning = await self.generate_completion_with_reasoning(
@@ -155,14 +162,17 @@ class KieApiGateway:
         seo = parsed_data.get('seo_meta', {})
         struct = parsed_data.get('content_structure', {})
 
-        headings_list = [f"- [{h.get('level', 'H')}] {h.get('text', '')}" for h in struct.get('headings', [])]
+        headings_list = [f"- [{h.get('level', 'H')}] {h.get('text', '')}" for h in struct.get('headings', [])][:40]
         headings_text = "\n".join(headings_list) or "Нет данных"
 
-        tables_text = "\n---\n".join(struct.get('tables', [])) or "Нет таблиц"
-        faq_text = "\n---\n".join(struct.get('faq_blocks', [])) or "Нет явных FAQ блоков"
+        raw_tables = "\n---\n".join(struct.get('tables', []))
+        tables_text = _clean_text_for_llm(raw_tables, max_chars=3000) or "Нет таблиц"
+
+        raw_faq = "\n---\n".join(struct.get('faq_blocks', []))
+        faq_text = _clean_text_for_llm(raw_faq, max_chars=3000) or "Нет явных FAQ блоков"
 
         raw_body = parsed_data.get('body_text', '')
-        clean_body = _clean_text_for_llm(raw_body, max_chars=12000)
+        clean_body = _clean_text_for_llm(raw_body, max_chars=10000)
 
         prompt = f"""
         Проведи глубокий коммерческий и LSA-анализ страницы конкурента {parsed_data.get('url')}:
