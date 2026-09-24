@@ -125,27 +125,27 @@ class GenerateArticleUseCase:
                     except Exception as err:
                         print(f"[Logo Upload Error]: {err}")
 
-            competitor_lengths = [
-                len(c.raw_text)
-                for c in (project.competitors or [])
-                if c.raw_text and len(c.raw_text.strip()) > 200
-            ]
+            competitor_lengths = []
+            for c in (project.competitors or []):
+                text = (c.graph_data.get("body_text") or c.raw_text or "").strip()
+                if 200 < len(text) < 40000: 
+                    competitor_lengths.append(len(text))
 
             if competitor_lengths:
                 avg_chars = sum(competitor_lengths) // len(competitor_lengths)
-                min_chars = int(avg_chars * 0.85)
-                max_chars = int(avg_chars * 1.15)
+                target_chars = min(max(avg_chars, 5000), 12000)
+                min_chars = int(target_chars * 0.85)
+                max_chars = int(target_chars * 1.15)
+                
                 volume_instruction = f"""
-                    ТРЕБОВАНИЕ К ОБЪЕМУ СТАТЬИ (НА ОСНОВЕ РАСЧЕТА КОНКУРЕНТОВ):
-                    • Средний объем текста у проанализированных конкурентов: ~{avg_chars} символов с пробелами.
-                    • ОБЯЗАТЕЛЬНО напиши статью сопоставимого объема: целевой ориентир {avg_chars} символов (диапазон от {min_chars} до {max_chars} символов).
-                    • Чтобы набрать этот объем без «воды», подробно раскрывай каждый блок, этапы, нюансы, приводи списки, таблицы и практические пояснения.
+                    ТРЕБОВАНИЕ К ОБЪЕМУ СТАТЬИ:
+                    • Целевой ориентир: ~{target_chars} символов с пробелами (диапазон от {min_chars} до {max_chars} символов).
+                    • Статья должна быть полностью завершенной, с логическим заключением (не обрывайся на полуслове!).
                     """
             else:
-                volume_instruction = "ТРЕБОВАНИЕ К ОБЪЕМУ: Напиши развернутую статью объемом 5000–8000 символов с пробелами."
+                volume_instruction = "ТРЕБОВАНИЕ К ОБЪЕМУ: Напиши развернутую статью объемом 6000–9000 символов с пробелами. Обязательно доведи мысль до конца."
 
-            print(
-                f"[GenerateArticleUseCase]: Рассчитан целевой объем: {avg_chars if competitor_lengths else 'дефолт'} символов")
+            print(f"[GenerateArticleUseCase]: Скорректирован безопасный объем: {target_chars if competitor_lengths else '6000-9000'} символов")
 
             primary_keyword = (project.keyword or topic).strip()
             prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
@@ -174,11 +174,14 @@ class GenerateArticleUseCase:
                     {ARTICLE_HTML_FORMAT_TEXT}
                     """
 
-            # 2. Генерация текста статьи через KIE.AI
             content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
             )
+
+            content = re.sub(r"cite[a-zA-Z0-9_:]+", "", content)
+            content = re.sub(r"【\d+[:†]?\d*†?[^】]*】", "", content)
+            
             content = normalize_article_html(content)
             h1_val, title_val, desc_val = extract_html_metadata(content, topic)
             content = remove_meta_block_from_html(content)
