@@ -7,7 +7,7 @@ from src.config.settings import settings
 
 
 def _clean_text_for_llm(text: str, max_chars: int = 35000) -> str:
-    """Удаляет непечатаемые символы, null-байты, сохраняя форматирование."""
+    """Удаляет непечатаемые символы, сохраняя форматирование."""
     if not text:
         return ""
 
@@ -16,27 +16,27 @@ def _clean_text_for_llm(text: str, max_chars: int = 35000) -> str:
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
     if len(cleaned) > max_chars:
-        cleaned = cleaned[:max_chars] + "\n...[текст обрезан для лимита контекста]"
+        cleaned = cleaned[:max_chars] + "\n...[текст обрезан для соблюдения лимитов]"
 
     return cleaned
 
 
 class KieApiGateway:
-    """Шлюз для генерации контента через KIE.AI GPT Codex API (/api/v1/responses)."""
+    """Шлюз для генерации контента через KIE.AI GPT 6 Sol (/codex/v1/responses)."""
 
     def __init__(self, http_client: httpx.AsyncClient):
         self._client = http_client
         self._api_key = settings.kie.API_KEY
         self._base_url = settings.kie.KIE_BASE_URL.rstrip('/')
-        self._endpoint = "/api/v1/responses"
-        self._model = settings.kie.CHAT_MODEL or "gpt-5.1-codex"
+        self._endpoint = "/codex/v1/responses"
+        self._model = settings.kie.CHAT_MODEL or "gpt-6-sol"
 
-    def _format_input_for_codex(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Преобразует историю сообщений в формат `input` схемы Codex."""
+    def _format_input_for_sol(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Преобразует сообщения в формат input для GPT 6 Sol."""
         formatted_input = []
         for msg in messages:
             role = msg.get("role", "user")
-            if role in ("system", "developer"):
+            if role == "system":
                 role = "developer"
 
             content = msg.get("content", "")
@@ -79,8 +79,8 @@ class KieApiGateway:
 
         return formatted_input
 
-    def _extract_codex_response(self, data: dict[str, Any]) -> tuple[str, str]:
-        """Извлекает текст ответа и рассуждения из формата `output` Codex."""
+    def _extract_response(self, data: dict[str, Any]) -> tuple[str, str]:
+        """Извлекает текст статьи и рассуждения из ответа GPT 6 Sol."""
         content_text = ""
         reasoning_text = ""
 
@@ -88,7 +88,6 @@ class KieApiGateway:
         for item in outputs:
             item_type = item.get("type")
 
-            # Извлекаем рассуждения
             if item_type == "reasoning":
                 summary = item.get("summary") or []
                 if isinstance(summary, list):
@@ -96,7 +95,6 @@ class KieApiGateway:
                 elif isinstance(summary, str):
                     reasoning_text = summary
 
-            # Извлекаем текст статьи/сообщения
             elif item_type == "message":
                 parts = item.get("content") or []
                 extracted_parts = []
@@ -107,7 +105,6 @@ class KieApiGateway:
                         extracted_parts.append(p.get("text", ""))
                 content_text = "\n".join(extracted_parts).strip()
 
-        # Фолбек на случай старого формата choices
         if not content_text and "choices" in data:
             choices = data.get("choices") or []
             if choices:
@@ -120,19 +117,25 @@ class KieApiGateway:
     async def generate_completion_with_reasoning(
             self,
             messages: list[dict[str, Any]],
-            reasoning_effort: str = "high",
+            reasoning_effort: str = "medium",
     ) -> tuple[str, str]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json"
         }
 
-        effort = "low"
+        r_effort = str(reasoning_effort).lower()
+        if r_effort in ("high", "xhigh"):
+            effort = "high"
+        elif r_effort == "low":
+            effort = "low"
+        else:
+            effort = "medium"
 
         payload = {
             "model": self._model,
-            "stream": False,  
-            "input": self._format_input_for_codex(messages),
+            "stream": False, 
+            "input": self._format_input_for_sol(messages),
             "reasoning": {
                 "effort": effort
             }
@@ -154,11 +157,11 @@ class KieApiGateway:
                         await asyncio.sleep(2.0 * attempt)
                         continue
 
-                    content, reasoning = self._extract_codex_response(data)
+                    content, reasoning = self._extract_response(data)
                     if content:
                         return content.strip(), reasoning.strip()
 
-                    last_error_text = f"Empty content in Codex response: {data}"
+                    last_error_text = f"Empty content in GPT 6 Sol response: {data}"
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
@@ -167,13 +170,13 @@ class KieApiGateway:
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
-                raise ValueError(f"Ошибка KIE.AI Codex ({response.status_code}): {response.text}")
+                raise ValueError(f"Ошибка KIE.AI GPT 6 Sol ({response.status_code}): {response.text}")
 
             except httpx.RequestError as req_err:
                 last_error_text = str(req_err)
                 await asyncio.sleep(2.0 * attempt)
 
-        raise ValueError(f"Ошибка KIE.AI Codex после {max_retries} попыток: {last_error_text}")
+        raise ValueError(f"Ошибка KIE.AI GPT 6 Sol после {max_retries} попыток: {last_error_text}")
 
     async def generate_completion(
             self,
@@ -190,7 +193,7 @@ class KieApiGateway:
             self,
             history: list[dict[str, Any]],
             user_prompt: str,
-            reasoning_effort: str = "high",
+            reasoning_effort: str = "medium",
     ) -> tuple[str, str, list[dict[str, Any]]]:
         system_msgs = [m for m in history if m.get("role") in ("system", "developer")]
         chat_msgs = [m for m in history if m.get("role") not in ("system", "developer")]
