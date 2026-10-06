@@ -73,6 +73,10 @@ class KieApiGateway:
                 "role": role,
                 "content": content_parts
             })
+
+        if formatted_input and not any(m["role"] == "user" for m in formatted_input):
+            formatted_input[-1]["role"] = "user"
+
         return formatted_input
 
     def _extract_codex_response(self, data: dict[str, Any]) -> tuple[str, str]:
@@ -123,7 +127,7 @@ class KieApiGateway:
             "Content-Type": "application/json"
         }
 
-        effort = "high" if str(reasoning_effort).lower() in ("high", "xhigh") else "medium"
+        effort = "low"
 
         payload = {
             "model": self._model,
@@ -249,5 +253,5 @@ class KieApiGateway:
 3. СИЛЬНЫЕ И СЛАБЫЕ СТОРОНЫ.
 4. ВЫЖИМКА ТЕЗИСОВ ДЛЯ НАШЕЙ СТАТЬИ.
 """
-        messages = [{"role": "developer", "content": prompt}]
+        messages = [{"role": "user", "content": prompt}]
         return await self.generate_completion(messages, reasoning_effort="low")
