@@ -124,20 +124,14 @@ class KieApiGateway:
             "Content-Type": "application/json"
         }
 
-        r_effort = str(reasoning_effort).lower()
-        if r_effort in ("high", "xhigh"):
-            effort = "high"
-        elif r_effort == "low":
-            effort = "low"
-        else:
-            effort = "medium"
+        r_effort = "low"
 
         payload = {
             "model": self._model,
             "stream": False, 
             "input": self._format_input_for_sol(messages),
             "reasoning": {
-                "effort": effort
+                "effort": r_effort
             }
         }
 
