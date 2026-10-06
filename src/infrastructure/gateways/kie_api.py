@@ -1,3 +1,5 @@
+# src/infrastructure/gateways/kie_api.py
+
 import asyncio
 import re
 from typing import Any
@@ -7,7 +9,7 @@ from src.config.settings import settings
 
 
 def _clean_text_for_llm(text: str, max_chars: int = 35000) -> str:
-    """Удаляет непечатаемые символы, сохраняя форматирование."""
+    """Удаляет непечатаемые символы, сохраняя структуру HTML и абзацев."""
     if not text:
         return ""
 
@@ -22,21 +24,22 @@ def _clean_text_for_llm(text: str, max_chars: int = 35000) -> str:
 
 
 class KieApiGateway:
-    """Шлюз для генерации контента через KIE.AI GPT 6 Sol (/codex/v1/responses)."""
+    """Шлюз для генерации контента через KIE.AI GPT 5.6 Luna (/codex/v1/responses)."""
 
     def __init__(self, http_client: httpx.AsyncClient):
         self._client = http_client
         self._api_key = settings.kie.API_KEY
         self._base_url = settings.kie.KIE_BASE_URL.rstrip('/')
         self._endpoint = "/codex/v1/responses"
-        self._model = settings.kie.CHAT_MODEL or "gpt-6-sol"
+        raw_model = settings.kie.CHAT_MODEL or "gpt-5-6-luna"
+        self._model = raw_model.replace(".", "-")
 
-    def _format_input_for_sol(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Преобразует сообщения в формат input для GPT 6 Sol."""
+    def _format_input_for_luna(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Преобразует сообщения в формат input схемы GPT 5.6 Luna."""
         formatted_input = []
         for msg in messages:
             role = msg.get("role", "user")
-            if role == "system":
+            if role in ("system", "developer"):
                 role = "developer"
 
             content = msg.get("content", "")
@@ -80,7 +83,7 @@ class KieApiGateway:
         return formatted_input
 
     def _extract_response(self, data: dict[str, Any]) -> tuple[str, str]:
-        """Извлекает текст статьи и рассуждения из ответа GPT 6 Sol."""
+        """Извлекает сгенерированный текст и рассуждения из output."""
         content_text = ""
         reasoning_text = ""
 
@@ -105,6 +108,7 @@ class KieApiGateway:
                         extracted_parts.append(p.get("text", ""))
                 content_text = "\n".join(extracted_parts).strip()
 
+        # Фолбек на случай choices
         if not content_text and "choices" in data:
             choices = data.get("choices") or []
             if choices:
@@ -124,14 +128,20 @@ class KieApiGateway:
             "Content-Type": "application/json"
         }
 
-        r_effort = "low"
+        r_effort = str(reasoning_effort).lower()
+        if r_effort in ("high", "xhigh"):
+            effort = "high"
+        elif r_effort == "low":
+            effort = "low"
+        else:
+            effort = "medium"
 
         payload = {
             "model": self._model,
-            "stream": False, 
-            "input": self._format_input_for_sol(messages),
+            "stream": False,  # Обязательно False, иначе придет SSE стрим
+            "input": self._format_input_for_luna(messages),
             "reasoning": {
-                "effort": r_effort
+                "effort": effort
             }
         }
 
@@ -155,7 +165,7 @@ class KieApiGateway:
                     if content:
                         return content.strip(), reasoning.strip()
 
-                    last_error_text = f"Empty content in GPT 6 Sol response: {data}"
+                    last_error_text = f"Empty content in GPT 5.6 Luna response: {data}"
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
@@ -164,13 +174,13 @@ class KieApiGateway:
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
-                raise ValueError(f"Ошибка KIE.AI GPT 6 Sol ({response.status_code}): {response.text}")
+                raise ValueError(f"Ошибка KIE.AI GPT 5.6 Luna ({response.status_code}): {response.text}")
 
             except httpx.RequestError as req_err:
                 last_error_text = str(req_err)
                 await asyncio.sleep(2.0 * attempt)
 
-        raise ValueError(f"Ошибка KIE.AI GPT 6 Sol после {max_retries} попыток: {last_error_text}")
+        raise ValueError(f"Ошибка KIE.AI GPT 5.6 Luna после {max_retries} попыток: {last_error_text}")
 
     async def generate_completion(
             self,
