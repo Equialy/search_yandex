@@ -171,46 +171,53 @@ Description:
 """
 
 ARTICLE_HTML_FORMAT_TEXT = """
-ФОРМАТ ОТВЕТА — HTML + CSS НА ОДНОЙ СТРАНИЦЕ (готово для вставки в Joomla/CMS):
+ФОРМАТ ОТВЕТА — СТРОГО ГОТОВЫЙ HTML + CSS:
 
-• В начале ответа ОБЯЗАТЕЛЬНО блок <style> с CSS-классами для всей статьи.
-• Сразу после </style> — HTML-разметка с этими классами на тегах.
-• Все стили — ТОЛЬКО через классы (префикс seo-article). БЕЗ inline style="" и БЕЗ <script>.
+КАТЕГОРИЧЕСКИЙ ЗАПРЕТ НА ДИАЛОГ И ОБЕЩАНИЯ:
+• ЗАПРЕЩЕНО писать любые вводные фразы, планы, обещания («сейчас напишу», «сверю данные», «вот статья»).
+• Твой ответ ОБЯЗАН начинаться СТРОГО со строки '<style>' и заканчиваться закрывающим тегом '</div>'.
+• ВЕСЬ текст статьи и CSS ДОЛЖНЫ быть сгенерированы СРАЗУ И ПОЛНОСТЬЮ в этом ЕДИНСТВЕННОМ сообщении.
 • БЕЗ markdown (#, **, |, ```). НЕ оборачивай ответ в ```html.
 • НЕ добавляй <html>, <head>, <body> — только <style> + фрагмент контента.
-• В блоке <div class="seo-article__meta"> укажи Title (только чистый ключ) и Description.
 
-ОБЯЗАТЕЛЬНАЯ СТРУКТУРА:
+ОБЯЗАТЕЛЬНАЯ СТРУКТУРА ОТВЕТА:
 
 <style>
-  .seo-article { ... базовые стили контейнера: шрифт, цвет, line-height, max-width ... }
-  .seo-article__meta { ... блок Title и Description ... }
-  .seo-article h2, .seo-article h3 { ... }
-  .seo-article p { ... }
-  .seo-article ul, .seo-article ol { ... }
-  .seo-article__table { width: 100%; border-collapse: collapse; ... }
-  .seo-article__table th, .seo-article__table td { border: 1px solid #ccc; padding: 8px; ... }
-  .seo-article__table thead { background: #f5f5f5; ... }
+  .seo-article { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1e293b; max-width: 900px; margin: 0 auto; padding: 20px; }
+  .seo-article__meta { background: #f8fafc; border-left: 4px solid #6366f1; padding: 12px 16px; margin-bottom: 24px; border-radius: 4px; }
+  .seo-article h1 { font-size: 2em; font-weight: 800; margin-bottom: 16px; color: #0f172a; }
+  .seo-article h2 { font-size: 1.5em; font-weight: 700; margin-top: 32px; margin-bottom: 12px; color: #1e293b; }
+  .seo-article h3 { font-size: 1.2em; font-weight: 600; margin-top: 24px; margin-bottom: 8px; color: #334155; }
+  .seo-article p { margin-bottom: 16px; }
+  .seo-article ul, .seo-article ol { margin-bottom: 16px; padding-left: 24px; }
+  .seo-article li { margin-bottom: 6px; }
+  .seo-article__table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 0.95em; }
+  .seo-article__table th, .seo-article__table td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }
+  .seo-article__table thead { background: #f1f5f9; font-weight: 600; }
 </style>
 
 <div class="seo-article">
-   <div class="seo-article__meta">
+  <div class="seo-article__meta">
     <p><strong>Title:</strong> Чистый ключевой запрос</p>
-    <p><strong>Description:</strong> Описание страницы (140-160 символов)...</p>
+    <p><strong>Description:</strong> Привлекательное описание страницы (140-160 символов)...</p>
   </div>
-   <h1>Главный заголовок с ключевым запросом</h1>
-  <p>Первый вводный абзац статьи, в котором ОБЯЗАТЕЛЬНО присутствует главный ключевой запрос...</p>
+  <h1>Главный заголовок с ключевым запросом</h1>
+  <p>Первый вводный абзац статьи, содержащий главный ключ...</p>
   <h2>...</h2>
-  <table class="seo-article__table">...</table>
+  <table class="seo-article__table">
+    <thead>
+      <tr><th>Услуга / Критерий</th><th>Стоимость / Условия</th><th>Описание</th></tr>
+    </thead>
+    <tbody>
+      ...
+    </tbody>
+  </table>
   ...
 </div>
 
 ПРАВИЛА:
-• Используй семантические теги: h1 (СТРОГО ОДИН в начале), h2, h3, p, ul, ol, li, strong, em, table, thead, tbody, tr, th, td.
-• Таблицы — с class="seo-article__table", заголовки колонок короткие (1–3 слова).
-• CSS должен быть аккуратным, читаемым, без @import и url() на внешние ресурсы.
-• Первый абзац статьи ОБЯЗАН содержать главный ключевой запрос.
-• Все теги корректно закрыты.
+• Начни вывод НЕПОСРЕДСТВЕННО с символа '<' тега <style>.
+• Все теги должны быть корректно закрыты.
 """
 
 CHAT_HTML_REFINEMENT_HINT = """
@@ -430,6 +437,11 @@ GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE = """
   * Экран рабочего планшета или монитора (в интерфейсе программы или дашборда).
   * Минималистичная табличка / брендинг на стене или стеклянной перегородке офиса.
 - Логотип должен выглядеть органично, с учетом перспективы и освещения кадра.
+
+
+КРИТИЧЕСКИ ВАЖНОЕ ТРЕБОВАНИЕ К ДЛИНЕ (ДЛЯ ИЗБЕЖАНИЯ ТАЙМАУТА):
+Каждый английский "prompt" должен быть КРАТКИМ и емким — максимум 40-60 слов (до 350 символов)!
+Описывай только ключевую сцену, ракурс, освещение и атмосферу. НЕ пиши длинных эссе!
 
 Верни СТРОГО валидный JSON-список из {images_count} элементов без markdown-обёрток (```json):
 [

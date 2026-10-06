@@ -3,7 +3,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from src.api.v1.text_router.schema import CalculateNauseaRequest
 from src.api.v1.text_router.service import TextAiService
-from src.application.article_format import inject_multiple_images_to_article, normalize_article_html
+from src.application.article_format import (
+    has_styled_article_html,
+    inject_multiple_images_to_article,
+    normalize_article_html,
+)
 from src.application.prompts import (
     ARTICLE_HTML_FORMAT_TEXT,
     GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE,
@@ -21,12 +25,15 @@ from src.application.prompts import (
 from src.application.uow import UnitOfWorkProtocol
 from src.config.settings import BASE_DIR
 from src.infrastructure.database.models.competitors import Article
-from src.infrastructure.gateways.image_kie_gateway import \
-    ImageKieGenerationGateway
+from src.infrastructure.gateways.image_kie_gateway import ImageKieGenerationGateway
 from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
-from src.utils.extract_data import remove_meta_block_from_html, convert_svg_to_png_bytes, normalize_logo_png, \
-    extract_html_metadata
+from src.utils.extract_data import (
+    convert_svg_to_png_bytes,
+    extract_html_metadata,
+    normalize_logo_png,
+    remove_meta_block_from_html,
+)
 
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -70,6 +77,24 @@ def save_article_to_html(article: Article) -> Path:
     return file_path
 
 
+def save_article_to_txt(article: Article) -> Path:
+    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    data = {
+        "id": str(article.id),
+        "projectId": str(article.project_id),
+        "title": article.title,
+        "content": article.content,
+        "reasoning": article.reasoning,
+        "createdAt": article.created_at.isoformat() if article.created_at else datetime.now(timezone.utc).isoformat(),
+    }
+
+    file_path = EXPORTS_ARTICLES_DIR / f"article_{now_str}_{article.id}.txt"
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return file_path
+
+
 class GenerateArticleUseCase:
     def __init__(
             self,
@@ -78,7 +103,6 @@ class GenerateArticleUseCase:
             parser_gateway: SiteParserGateway,
             image_gateway: ImageKieGenerationGateway,
             text_ai_service: TextAiService,
-
     ):
         self._uow = uow
         self._kie = ai_gateway
@@ -103,15 +127,23 @@ class GenerateArticleUseCase:
             company_name = target_site if target_site else "Наша компания"
             target_data_prompt = ""
             target_site_parse: dict[str, Any] | None = None
-            logo_url: str | None = None
-            logo_bytes: bytes | None = None
-
             cdn_logo_url = None
+
             if target_site and target_site.startswith("http"):
                 parsed_target = await self._parser.parse_site_to_graph(target_site)
                 target_site_parse = build_target_site_parse(target_site, parsed_target)
-                logo_url = parsed_target.get("logo_url")
+                
+                if parsed_target and parsed_target.get("body_text"):
+                    company_name = parsed_target.get("title") or target_site
+                    target_data_prompt = f"""
+ДАННЫЕ И ПРАЙСЫ НАШЕГО САЙТА ({target_site}):
+Title: {parsed_target.get('title')}
+Description: {parsed_target.get('description')}
+Текст и прайсы компании:
+{parsed_target.get('body_text')}
+"""
 
+                logo_url = parsed_target.get("logo_url") if parsed_target else None
                 if logo_url:
                     try:
                         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as http_client:
@@ -128,7 +160,7 @@ class GenerateArticleUseCase:
             competitor_lengths = []
             for c in (project.competitors or []):
                 text = (c.graph_data.get("body_text") or c.raw_text or "").strip()
-                if 200 < len(text) < 40000: 
+                if 200 < len(text) < 40000:
                     competitor_lengths.append(len(text))
 
             if competitor_lengths:
@@ -136,57 +168,75 @@ class GenerateArticleUseCase:
                 target_chars = min(max(avg_chars, 5000), 20000)
                 min_chars = int(target_chars * 0.85)
                 max_chars = int(target_chars * 1.15)
-                
+
                 volume_instruction = f"""
-                    ТРЕБОВАНИЕ К ОБЪЕМУ СТАТЬИ:
-                    • Целевой ориентир: ~{target_chars} символов с пробелами (диапазон от {min_chars} до {max_chars} символов).
-                    • Статья должна быть полностью завершенной, с логическим заключением (не обрывайся на полуслове!).
-                    """
+ТРЕБОВАНИЕ К ОБЪЕМУ СТАТЬИ:
+• Целевой ориентир объема: ~{target_chars} символов с пробелами (диапазон от {min_chars} до {max_chars} символов).
+• Статья должна быть глубокой, полностью завершенной, с подробным раскрытием каждого этапа, списков и таблиц.
+"""
             else:
+                target_chars = 7500
                 volume_instruction = "ТРЕБОВАНИЕ К ОБЪЕМУ: Напиши развернутую статью объемом 6000–9000 символов с пробелами. Обязательно доведи мысль до конца."
 
-            print(f"[GenerateArticleUseCase]: Скорректирован безопасный объем: {target_chars if competitor_lengths else '6000-9000'} символов")
+            print(f"[GenerateArticleUseCase]: Скорректирован безопасный объем: {target_chars} символов")
 
             primary_keyword = (project.keyword or topic).strip()
-            prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
 
-                    {target_data_prompt}
+            prompt = f"""Напиши готовую коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
 
-                    {volume_instruction}
+{target_data_prompt}
 
-                    ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
-                    • В блоке meta:
-                        - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
-                        - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
+{volume_instruction}
 
-                    • ЗАГОЛОВОК H1:
-                        - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.
+ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
+• В блоке meta:
+    - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
+    - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
 
-                    • ПЕРВЫЙ АБЗАЦ СТАТЬИ:
-                        - В первом вводном абзаце (сразу после <h1>) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
-                        
-                    СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
-                    {SEO_GENERATE_ARTICLE}
+• ЗАГОЛОВОК H1:
+    - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.
 
-                    ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
-                    {instructions}
+• ПЕРВЫЙ АБЗАЦ СТАТЬИ:
+    - В первом вводном абзаце (сразу после <h1>) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
 
-                    {ARTICLE_HTML_FORMAT_TEXT}
-                    """
+СТРОЖАЙШИЙ ЗАПРЕТ НА ДИАЛОГ ИЛИ ПЛАНЫ:
+- ЗАПРЕЩЕНО писать вводные фразы, объяснения, планы («сейчас напишу», «сверю сведения»).
+- Начни ответ НЕПОСРЕДСТВЕННО со строки '<style>' и сгенерируй ПОЛНУЮ готовую статью целиком прямо в этом сообщении.
+
+СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
+{SEO_GENERATE_ARTICLE}
+
+ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
+{instructions}
+
+{ARTICLE_HTML_FORMAT_TEXT}
+"""
 
             content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
                 user_prompt=prompt
             )
 
+            if len(content.strip()) < 1000 or not has_styled_article_html(content):
+                print(f"[GenerateArticleUseCase Warning]: Модель прислала отписку ({len(content)} симв.). Запускаем принудительный дожим...")
+                retry_prompt = (
+                    "ОШИБКА: Ты прислал короткое текстовое обещание/план вместо самой статьи!\n"
+                    "ЗАПРЕЩЕНО писать любые комментарии. Начни ответ СТРОГО с тега '<style>' "
+                    f"и сгенерируй ПОЛНУЮ готовую HTML-статью на тему '{topic}' целевым объемом ~{target_chars} символов прямо сейчас!"
+                )
+                content, reasoning, updated_history = await self._kie.completion_with_history(
+                    history=updated_history,
+                    user_prompt=retry_prompt
+                )
+
+            # 4. Очистка и нормализация HTML
             content = re.sub(r"cite[a-zA-Z0-9_:]+", "", content)
             content = re.sub(r"【\d+[:†]?\d*†?[^】]*】", "", content)
-            
+
             content = normalize_article_html(content)
             h1_val, title_val, desc_val = extract_html_metadata(content, topic)
             content = remove_meta_block_from_html(content)
 
-            # 3. Расчет SEO-метрик
             clean_text = re.sub(r"<style[^>]*>.*?</style>", " ", content, flags=re.DOTALL | re.IGNORECASE)
             clean_text = re.sub(r"<[^>]+>", " ", clean_text)
             clean_text = re.sub(r"\s+", " ", clean_text).strip()
@@ -213,12 +263,11 @@ class GenerateArticleUseCase:
                     "humanPercentage": detect_res.human_percentage,
                     "aiReason": detect_res.reason,
                 }
-                print(
-                    f"[SEO Metrics]: Символов={char_count}, Тошнота={nausea_res.academic_nausea}%, Человечность={detect_res.human_percentage}%")
+                print(f"[SEO Metrics]: Символов={char_count}, Тошнота={nausea_res.academic_nausea}%, Человечность={detect_res.human_percentage}%")
             except Exception as metric_err:
                 print(f"⚠️ [SEO Metrics Warning]: {metric_err}")
 
-            # 4. Генерация картинок через KIE.AI (Nano Banana 2 Lite)
+            # 6. Генерация картинок через KIE.AI (Nano Banana 2 Lite)
             generated_images = []
             try:
                 img_prompt_req = GENERATE_MULTIPLE_IMAGES_PROMPT_TEMPLATE.format(
@@ -235,7 +284,9 @@ class GenerateArticleUseCase:
                     image_configs = [
                         {
                             "prompt": f"Commercial 4K photography, specialist with {company_name} logo on uniform, {topic}, photorealistic",
-                            "alt": topic, "caption": ""}
+                            "alt": topic,
+                            "caption": "",
+                        }
                         for _ in range(images_count)
                     ]
 
@@ -260,7 +311,6 @@ class GenerateArticleUseCase:
             except Exception as err:
                 print(f"[Images Generation Error]: {err}")
 
-            # 5. Сохранение в БД
             if updated_history and updated_history[-1].get("role") == "assistant":
                 updated_history[-1]["content"] = content
 
@@ -276,6 +326,7 @@ class GenerateArticleUseCase:
             )
             await uow.articles.add(article)
             save_article_to_html(article)
+            save_article_to_txt(article)
 
             return GenerateArticleResult(
                 article=article,
