@@ -2,18 +2,13 @@ import re
 
 
 def has_styled_article_html(content: str) -> bool:
-    """Проверяет, что ответ — действительно HTML-статья с CSS и текстовыми тегами."""
+    """Проверяет, что ответ — HTML-статья с CSS-блоком."""
     text = (content or "").strip().lower()
-    if not text or len(text) < 600:
-        return False
-    has_style = "<style" in text
-    has_headings = ("<h1" in text or "<h2" in text)
-    has_paragraphs = text.count("<p") >= 3 
-    return has_style and has_headings and has_paragraphs
+    return bool(text) and "<style" in text and ("seo-article" in text or "<h1" in text)
 
 
 def normalize_article_html(html_text: str) -> str:
-    """Очищает HTML-ответ от markdown-обёрток и закрывает теги."""
+    """Очищает HTML-ответ от markdown-обёрток, артефактов writing/canvas и мусора."""
     if not html_text:
         return ""
 
@@ -21,17 +16,18 @@ def normalize_article_html(html_text: str) -> str:
 
     text = re.sub(r":::[a-zA-Z0-9_-]+(?:\{.*?\})?", "", text)
     text = re.sub(r"^:::\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r":::$", "", text).strip()
+
     text = re.sub(r"^```(?:html|css|xml)?\s*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s*```$", "", text).strip()
+    text = re.sub(r"\s*```$", "", text)
 
     match = re.search(r"(<style\b|<div\b)", text, re.IGNORECASE)
     if match:
         text = text[match.start():]
 
-    open_divs = len(re.findall(r"<div\b", text, re.IGNORECASE))
-    close_divs = len(re.findall(r"</div>", text, re.IGNORECASE))
-    if open_divs > close_divs:
-        text += "\n" + ("</div>" * (open_divs - close_divs))
+    last_div_idx = text.rfind("</div>")
+    if last_div_idx != -1:
+        text = text[:last_div_idx + len("</div>")]
 
     return text.strip()
 
