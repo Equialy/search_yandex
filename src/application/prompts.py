@@ -171,53 +171,54 @@ Description:
 """
 
 ARTICLE_HTML_FORMAT_TEXT = """
-ФОРМАТ ОТВЕТА — СТРОГО ГОТОВЫЙ HTML + CSS:
+ТРЕБОВАНИЕ К ФОРМАТУ ОТВЕТА (СТРОГО HTML+CSS):
+• Ответ ОБЯЗАН быть готовым фрагментом HTML со стилями <style>.
+• Твой ответ ДОЛЖЕН начинаться со строки '<style>' и заканчиваться '</div>'.
+• ЗАПРЕЩЕНО писать любые вводные слова («Вот статья», «Сначала сверю...») или оборачивать в ```html.
+• Каждый абзац ОБЯЗАТЕЛЬНО оборачивай в <p>...</p>.
+• Каждый заголовок — в <h2>...</h2> или <h3>...</h3>.
+• Списки — в <ul><li>...</li></ul> или <ol><li>...</li></ol>.
+• Таблицы — в <table class="seo-article__table"><thead>...</thead><tbody>...</tbody></table>.
 
-КАТЕГОРИЧЕСКИЙ ЗАПРЕТ НА ДИАЛОГ И ОБЕЩАНИЯ:
-• ЗАПРЕЩЕНО писать любые вводные фразы, планы, обещания («сейчас напишу», «сверю данные», «вот статья»).
-• Твой ответ ОБЯЗАН начинаться СТРОГО со строки '<style>' и заканчиваться закрывающим тегом '</div>'.
-• ВЕСЬ текст статьи и CSS ДОЛЖНЫ быть сгенерированы СРАЗУ И ПОЛНОСТЬЮ в этом ЕДИНСТВЕННОМ сообщении.
-• БЕЗ markdown (#, **, |, ```). НЕ оборачивай ответ в ```html.
-• НЕ добавляй <html>, <head>, <body> — только <style> + фрагмент контента.
-
-ОБЯЗАТЕЛЬНАЯ СТРУКТУРА ОТВЕТА:
-
+ОБЯЗАТЕЛЬНЫЙ КАРКАС:
 <style>
-  .seo-article { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1e293b; max-width: 900px; margin: 0 auto; padding: 20px; }
-  .seo-article__meta { background: #f8fafc; border-left: 4px solid #6366f1; padding: 12px 16px; margin-bottom: 24px; border-radius: 4px; }
-  .seo-article h1 { font-size: 2em; font-weight: 800; margin-bottom: 16px; color: #0f172a; }
-  .seo-article h2 { font-size: 1.5em; font-weight: 700; margin-top: 32px; margin-bottom: 12px; color: #1e293b; }
-  .seo-article h3 { font-size: 1.2em; font-weight: 600; margin-top: 24px; margin-bottom: 8px; color: #334155; }
-  .seo-article p { margin-bottom: 16px; }
-  .seo-article ul, .seo-article ol { margin-bottom: 16px; padding-left: 24px; }
-  .seo-article li { margin-bottom: 6px; }
-  .seo-article__table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 0.95em; }
-  .seo-article__table th, .seo-article__table td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }
+  .seo-article { font-family: system-ui, -apple-system, sans-serif; line-height: 1.7; color: #1e293b; max-width: 900px; margin: 0 auto; padding: 24px; }
+  .seo-article__meta { background: #f8fafc; border-left: 4px solid #6366f1; padding: 14px 18px; margin-bottom: 28px; border-radius: 6px; }
+  .seo-article h1 { font-size: 2.2em; font-weight: 800; margin-bottom: 20px; color: #0f172a; }
+  .seo-article h2 { font-size: 1.55em; font-weight: 700; margin-top: 36px; margin-bottom: 14px; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+  .seo-article h3 { font-size: 1.25em; font-weight: 600; margin-top: 24px; margin-bottom: 10px; color: #334155; }
+  .seo-article p { margin-bottom: 16px; font-size: 1.02em; }
+  .seo-article ul, .seo-article ol { margin-bottom: 20px; padding-left: 28px; }
+  .seo-article li { margin-bottom: 8px; }
+  .seo-article__table { width: 100%; border-collapse: collapse; margin: 28px 0; }
+  .seo-article__table th, .seo-article__table td { border: 1px solid #cbd5e1; padding: 12px 16px; text-align: left; }
   .seo-article__table thead { background: #f1f5f9; font-weight: 600; }
 </style>
 
 <div class="seo-article">
   <div class="seo-article__meta">
-    <p><strong>Title:</strong> Чистый ключевой запрос</p>
-    <p><strong>Description:</strong> Привлекательное описание страницы (140-160 символов)...</p>
+    <p><strong>Title:</strong> Чистый главный ключевой запрос</p>
+    <p><strong>Description:</strong> Описание страницы от 140 до 160 символов с главным ключом и выгодами...</p>
   </div>
-  <h1>Главный заголовок с ключевым запросом</h1>
-  <p>Первый вводный абзац статьи, содержащий главный ключ...</p>
-  <h2>...</h2>
+  <h1>Главный заголовок статьи с ключом</h1>
+  <p>Первый вводный абзац статьи с главным ключевым запросом...</p>
+  <h2>Раздел статьи</h2>
+  <p>Текст раздела...</p>
+  <ul>
+    <li>Пункт списка 1</li>
+    <li>Пункт списка 2</li>
+  </ul>
   <table class="seo-article__table">
     <thead>
-      <tr><th>Услуга / Критерий</th><th>Стоимость / Условия</th><th>Описание</th></tr>
+      <tr><th>Услуга / Критерий</th><th>Стоимость</th><th>Описание</th></tr>
     </thead>
     <tbody>
-      ...
+      <tr><td>Услуга</td><td>Цена</td><td>Описание</td></tr>
     </tbody>
   </table>
-  ...
+  <h2>Финальный коммерческий раздел</h2>
+  <p>Последний абзац статьи с главным ключом и названием компании...</p>
 </div>
-
-ПРАВИЛА:
-• Начни вывод НЕПОСРЕДСТВЕННО с символа '<' тега <style>.
-• Все теги должны быть корректно закрыты.
 """
 
 CHAT_HTML_REFINEMENT_HINT = """
