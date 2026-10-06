@@ -182,31 +182,33 @@ Description: {parsed_target.get('description')}
 
             primary_keyword = (project.keyword or topic).strip()
 
-            prompt = f"""Напиши готовую коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
+            prompt = f"""Ты — Senior Frontend & SEO разработчик и профессиональный коммерческий копирайтер.
+Сгенерируй ГОТОВУЮ коммерческую статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
 
 {target_data_prompt}
 
 {volume_instruction}
 
-ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
-• В блоке meta:
-    - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
-    - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
+ЖЕСТКИЕ ТРЕБОВАНИЯ К HTML-РАЗМЕТКЕ (КАТЕГОРИЧЕСКИ ЗАПРЕЩЕН ГОЛЫЙ ТЕКСТ):
+1. Весь ответ — единый HTML-код со стилями. Начни ответ СТРОГО с тега '<style>' и закончи тегом '</div>'.
+2. Сразу после блока </style> помести открывающий тег:
+   <div class="seo-article">
+3. Мета-блок оформи строго внутри тегов:
+   <div class="seo-article__meta">
+     <p><strong>Title:</strong> {primary_keyword}</p>
+     <p><strong>Description:</strong> 140–160 символов: главный ключ {primary_keyword} + {company_name} + конкретные выгоды.</p>
+   </div>
+4. Главный заголовок: СТРОГО один тег <h1>{primary_keyword}</h1>.
+5. КАЖДЫЙ абзац статьи ОБЯЗАТЕЛЬНО оборачивай в тег <p>...</p>. Запрещено выводить неразмеченный текст!
+6. Подзаголовки блоков — СТРОГО в тегах <h2>...</h2> и <h3>...</h3>.
+7. Списки — только в <ul><li>...</li></ul> или <ol><li>...</li></ol>.
+8. Таблицы — только валидный HTML: <table class="seo-article__table"><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>. Не используй псевдографику!
+9. В самом конце статьи обязательно закрой корневой тег: </div>.
 
-• ЗАГОЛОВОК H1:
-    - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.
-
-• ПЕРВЫЙ АБЗАЦ СТАТЬИ:
-    - В первом вводном абзаце (сразу после <h1>) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
-
-СТРОЖАЙШИЙ ЗАПРЕТ НА ДИАЛОГ ИЛИ ПЛАНЫ:
-- ЗАПРЕЩЕНО писать вводные фразы, объяснения, планы («сейчас напишу», «сверю сведения»).
-- Начни ответ НЕПОСРЕДСТВЕННО со строки '<style>' и сгенерируй ПОЛНУЮ готовую статью целиком прямо в этом сообщении.
-
-СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
+СТРОГИЕ ПРАВИЛА И СТИЛЬ:
 {SEO_GENERATE_ARTICLE}
 
-ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
+ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ:
 {instructions}
 
 {ARTICLE_HTML_FORMAT_TEXT}
@@ -214,8 +216,23 @@ Description: {parsed_target.get('description')}
 
             content, reasoning, updated_history = await self._kie.completion_with_history(
                 history=list(project.chat_history),
-                user_prompt=prompt
+                user_prompt=prompt,
+                reasoning_effort="high"
             )
+
+            if len(content.strip()) < 1500 or not has_styled_article_html(content):
+                print(f"[GenerateArticleUseCase Warning]: Модель прислала некорректную структуру ({len(content)} симв.). Запуск принудительного исправления...")
+                retry_prompt = (
+                    "ОШИБКА: Твой ответ не является валидным HTML или в нем отсутствуют теги <p> и <h2>!\n"
+                    f"Напиши ПОЛНУЮ готовую статью на тему '{topic}' объемом ~{target_chars} символов. "
+                    "Начни ответ СТРОГО со строки '<style>' и обязательно оберни КАЖДЫЙ абзац в тег <p>...</p>, "
+                    "а каждый раздел в <h2>...</h2>!"
+                )
+                content, reasoning, updated_history = await self._kie.completion_with_history(
+                    history=updated_history,
+                    user_prompt=retry_prompt,
+                    reasoning_effort="high"
+                )
 
             if len(content.strip()) < 1000 or not has_styled_article_html(content):
                 print(f"[GenerateArticleUseCase Warning]: Модель прислала отписку ({len(content)} симв.). Запускаем принудительный дожим...")

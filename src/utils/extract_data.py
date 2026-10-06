@@ -36,26 +36,22 @@ def extract_html_metadata(html_content: str, fallback_title: str) -> tuple[str, 
     return h1_text, title_text, desc_text
 
 
+
 def remove_meta_block_from_html(html_content: str) -> str:
-    """Удаляет блок .seo-article__meta и его CSS-класс из HTML-разметки."""
-    if not html_content:
+    """Безопасно удаляет блок .seo-article__meta через BeautifulSoup без риска стереть статью."""
+    if not html_content or "seo-article__meta" not in html_content:
         return html_content
 
-    # Удаляем сам блок div с метатегами
-    cleaned = re.sub(
-        r'<div[^>]*class=["\'][^"\']*seo-article__meta[^"\']*["\'][^>]*>.*?</div>',
-        "",
-        html_content,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    # Удаляем упоминания стилей .seo-article__meta { ... }
-    cleaned = re.sub(
-        r'\.seo-article__meta\s*\{[^}]*\}',
-        "",
-        cleaned,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    return cleaned.strip()
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        meta_div = soup.find(class_=re.compile(r"seo-article__meta", re.I))
+        if meta_div and isinstance(meta_div, Tag):
+            meta_div.decompose()
+            return str(soup)
+    except Exception as e:
+        print(f"[remove_meta_block Error]: {e}")
+
+    return html_content
 
 
 def _get_img_src(img_tag: Tag) -> str | None:

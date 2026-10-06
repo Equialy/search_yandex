@@ -140,11 +140,11 @@ class KieApiGateway:
         )
         return content
 
-    async def completion_with_history(
+     async def completion_with_history(
             self,
             history: list[dict[str, Any]],
             user_prompt: str,
-            reasoning_effort: str = "low",
+            reasoning_effort: str = "high", 
     ) -> tuple[str, str, list[dict[str, Any]]]:
         system_msgs = [m for m in history if m.get("role") in ("system", "developer")]
         chat_msgs = [m for m in history if m.get("role") not in ("system", "developer")]
