@@ -1,136 +1,146 @@
+# src/application/article_format.py
+
 import re
 
 
-def has_styled_article_html(content: str) -> bool:
-    """Проверяет, что ответ — HTML-статья с CSS-блоком."""
-    text = (content or "").strip().lower()
-    return bool(text) and "<style" in text and ("seo-article" in text or "<h1" in text)
-
-
 def normalize_article_html(html_text: str) -> str:
-    """Очищает HTML-ответ от markdown-обёрток, артефактов writing/canvas и мусора."""
+    """Очищает HTML-ответ от артефактов Canvas (:::writing) и markdown-обёрток."""
     if not html_text:
         return ""
 
     text = html_text.strip()
 
+    # Удаляем артефакты Canvas / writing
+    text = re.sub(r":::writing\{[^}]*\}", "", text, flags=re.IGNORECASE)
     text = re.sub(r":::[a-zA-Z0-9_-]+(?:\{.*?\})?", "", text)
     text = re.sub(r"^:::\s*$", "", text, flags=re.MULTILINE)
     text = re.sub(r":::$", "", text).strip()
 
+    # Удаляем markdown-блоки кода
     text = re.sub(r"^```(?:html|css|xml)?\s*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s*```$", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
 
+    # Находим начало разметки
     match = re.search(r"(<style\b|<div\b)", text, re.IGNORECASE)
     if match:
         text = text[match.start():]
 
-    last_div_idx = text.rfind("</div>")
-    if last_div_idx != -1:
-        text = text[:last_div_idx + len("</div>")]
-
     return text.strip()
 
 
-def strip_style_block(html: str) -> str:
-    """Убирает <style> из HTML — для отдельного контекста стилизации."""
-    without_style = re.sub(
-        r"<style[^>]*>.*?</style>",
-        "",
-        html or "",
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    return re.sub(r"\n{3,}", "\n\n", without_style).strip()
+def ensure_semantic_html(raw_content: str, topic: str) -> str:
+    """
+    Превращает свободный текст Canvas-модели в строгий семантический HTML
+    с тегами <div class="seo-article">, <h1>, <h2>, <p>, <ul> и <table>.
+    """
+    if not raw_content:
+        return ""
 
+    text = normalize_article_html(raw_content)
 
-def truncate_for_style_context(html: str, max_chars: int = 14000) -> str:
-    """Обрезает разметку, если статья слишком длинная для vision-контекста."""
-    text = (html or "").strip()
-    if len(text) <= max_chars:
-        return text
-    return f"{text[:max_chars]}\n\n<!-- ...статья обрезана для контекста стилизации... -->"
-
-
-def merge_style_with_markup(response_html: str, article_markup: str) -> str:
-    """Склеивает <style> из ответа с markup, если модель вернула только CSS."""
-    response = (response_html or "").strip()
-    markup = (article_markup or "").strip()
-    if not response:
-        return markup
-    if not markup:
-        return response
-
-    lower = response.lower()
-    if "<h1" in lower or 'class="seo-article"' in lower or "class='seo-article'" in lower:
-        return response
-
-    style_match = re.search(r"<style[^>]*>.*?</style>", response, flags=re.DOTALL | re.IGNORECASE)
+    # 1. Извлекаем блок <style>
+    style_block = ""
+    style_match = re.search(r"<style[^>]*>.*?</style>", text, flags=re.DOTALL | re.IGNORECASE)
     if style_match:
-        return f"{style_match.group(0)}\n{markup}"
-    return response
+        style_block = style_match.group(0)
+        body = text[style_match.end():].strip()
+    else:
+        body = text
 
+    # Если уже есть полноценная HTML-разметка — просто проверяем контейнер
+    if body.count("<p>") >= 6 and ("<h1" in body or "<h2" in body):
+        if not body.strip().startswith("<div"):
+            body = f'<div class="seo-article">\n{body}\n</div>'
+        return f"{style_block}\n{body}" if style_block else body
 
-def inject_image_to_article(
-        html_content: str,
-        image_url: str,
-        alt_text: str,
-        caption: str | None = None
-) -> str:
-    """
-    Вставляет баннер/изображение сразу после h1 или первого абзаца статьи.
-    Также добавляет CSS-стили для .seo-article__image, если их нет.
-    """
-    if not html_content or not image_url:
-        return html_content
+    # 2. Построчно парсим блоки текста
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", body) if b.strip()]
+    formatted_html_blocks = []
+    h1_added = False
 
-    caption_html = f"<figcaption>{caption}</figcaption>" if caption else ""
-    image_tag = (
-        f'\n  <figure class="seo-article__image-wrapper">\n'
-        f'    <img src="{image_url}" alt="{alt_text}" class="seo-article__img" loading="lazy" />\n'
-        f'    {caption_html}\n'
-        f'  </figure>\n'
-    )
+    for block in blocks:
+        # Пропускаем метаданные Title/Description (они обрабатываются отдельно)
+        if re.match(r"^(title|description):", block, re.I):
+            continue
 
-    image_css = (
-        "\n  .seo-article__image-wrapper { margin: 24px 0; text-align: center; }\n"
-        "  .seo-article__img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }\n"
-        "  .seo-article__image-wrapper figcaption { font-size: 0.85em; color: #666; margin-top: 8px; }\n"
-    )
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
 
-    if "</style>" in html_content:
-        html_content = html_content.replace("</style>", f"{image_css}</style>", 1)
+        # Проверка на список (строки начинаются с •, -, — или цифр)
+        is_list = all(re.match(r"^(?:[\u2022\-\—\*\+]|\d+[\.\)])\s+", l) for l in lines) and len(lines) > 1
+        if is_list:
+            items_html = []
+            for l in lines:
+                clean_item = re.sub(r"^(?:[\u2022\-\—\*\+]|\d+[\.\)])\s*", "", l)
+                items_html.append(f"    <li>{clean_item}</li>")
+            formatted_html_blocks.append("  <ul>\n" + "\n".join(items_html) + "\n  </ul>")
+            continue
 
-    if "</h1>" in html_content:
-        return html_content.replace("</h1>", f"</h1>\n{image_tag}", 1)
-    elif "</p>" in html_content:
-        return html_content.replace("</p>", f"</p>\n{image_tag}", 1)
+        # Одиночная строка: проверяем, заголовок это или абзац
+        if len(lines) == 1:
+            line = lines[0]
 
-    return f"{image_tag}\n{html_content}"
+            # Если строка уже содержит HTML-тег
+            if line.startswith("<"):
+                formatted_html_blocks.append(f"  {line}")
+                continue
 
+            # Первый главный заголовок H1
+            if not h1_added and len(line) < 130 and not line.endswith((".", "!", "?")):
+                formatted_html_blocks.append(f"  <h1>{line}</h1>")
+                h1_added = True
+                continue
 
-# src/application/article_format.py
+            # Подзаголовки H2 (короткие фразы без точки на конце)
+            if len(line) < 100 and not line.endswith((".", "!", "?", ";", ":")):
+                formatted_html_blocks.append(f"  <h2>{line}</h2>")
+                continue
 
-import re
+            # Обычный короткий абзац
+            formatted_html_blocks.append(f"  <p>{line}</p>")
+            continue
+
+        # Многострочный текстовый блок
+        # Проверяем строки со структурой "термин — описание"
+        dash_items = [l for l in lines if " — " in l or " - " in l]
+        if len(dash_items) >= 2 and len(dash_items) == len(lines):
+            items_html = []
+            for l in lines:
+                parts = re.split(r"\s+[—\-]\s+", l, maxsplit=1)
+                if len(parts) == 2:
+                    items_html.append(f"    <li><strong>{parts[0]}</strong> — {parts[1]}</li>")
+                else:
+                    items_html.append(f"    <li>{l}</li>")
+            formatted_html_blocks.append("  <ul>\n" + "\n".join(items_html) + "\n  </ul>")
+            continue
+
+        # Иначе склеиваем строки в один абзац <p>
+        merged_paragraph = " ".join(lines)
+        # Очищаем от случайных обрывков тегов (например, </td>, </th>)
+        merged_paragraph = re.sub(r"</?(?:td|th|tr|tbody|thead|table)[^>]*>", "", merged_paragraph)
+        if merged_paragraph.strip():
+            formatted_html_blocks.append(f"  <p>{merged_paragraph}</p>")
+
+    if not h1_added:
+        formatted_html_blocks.insert(0, f"  <h1>{topic}</h1>")
+
+    article_html = f'<div class="seo-article">\n' + "\n".join(formatted_html_blocks) + "\n</div>"
+    return f"{style_block}\n{article_html}" if style_block else article_html
+
 
 def inject_multiple_images_to_article(
     html_content: str,
-    images: list[dict[str, str]],  # [{"url": "...", "alt": "...", "caption": "..."}]
+    images: list[dict[str, str]],
 ) -> str:
-    """
-    Распределяет список изображений по всей статье:
-    - 1-е изображение: после заголовка H1 (Hero-баннер)
-    - Последующие изображения: равномерно после заголовков H2
-    """
+    """Равномерно распределяет изображения по всей статье."""
     if not html_content or not images:
         return html_content
 
-    # 1. Добавляем стили для адаптивных картинок
     image_css = """
   .seo-article__image-wrapper { margin: 28px 0; text-align: center; }
   .seo-article__img { width: 100%; max-height: 480px; object-fit: cover; border-radius: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
   .seo-article__image-wrapper figcaption { font-size: 0.85em; color: #64748b; margin-top: 8px; font-style: italic; }
 """
-    if "</style>" in html_content:
+    if "</style>" in html_content and ".seo-article__image-wrapper" not in html_content:
         html_content = html_content.replace("</style>", f"{image_css}</style>", 1)
 
     def make_figure(img_item: dict[str, str]) -> str:
@@ -143,40 +153,48 @@ def inject_multiple_images_to_article(
             f'  </figure>\n'
         )
 
-    # 2. Вставляем 1-ю картинку после H1
-    if images and "</h1>" in html_content:
-        hero_figure = make_figure(images[0])
+    # 1. Первая картинка (Hero) после <h1> или первого абзаца
+    hero_figure = make_figure(images[0])
+    remaining_images = images[1:]
+
+    if "</h1>" in html_content:
         html_content = html_content.replace("</h1>", f"</h1>\n{hero_figure}", 1)
-        remaining_images = images[1:]
+    elif "</p>" in html_content:
+        html_content = html_content.replace("</p>", f"</p>\n{hero_figure}", 1)
     else:
-        remaining_images = images
+        html_content = hero_figure + "\n" + html_content
 
     if not remaining_images:
         return html_content
 
-    # 3. Распределяем оставшиеся картинки после H2 тегов
+    # 2. Распределяем остальные картинки после <h2> тегов
     h2_matches = list(re.finditer(r"</h2>", html_content, flags=re.IGNORECASE))
-    if not h2_matches:
-        return html_content
-
-    # Если H2 блоков несколько, вставляем с шагом (например, после 2-го и 4-го H2)
-    step = max(1, len(h2_matches) // (len(remaining_images) + 1))
-    offset = 0
-
-    for i, img_data in enumerate(remaining_images, start=1):
-        target_idx = min(i * step, len(h2_matches) - 1)
-        match = h2_matches[target_idx]
-        pos = match.end() + offset
-
-        fig_html = make_figure(img_data)
-        html_content = html_content[:pos] + fig_html + html_content[pos:]
-        offset += len(fig_html)
+    if h2_matches:
+        step = max(1, len(h2_matches) // (len(remaining_images) + 1))
+        offset = 0
+        for i, img_data in enumerate(remaining_images, start=1):
+            target_idx = min(i * step, len(h2_matches) - 1)
+            pos = h2_matches[target_idx].end() + offset
+            fig_html = make_figure(img_data)
+            html_content = html_content[:pos] + fig_html + html_content[pos:]
+            offset += len(fig_html)
+    else:
+        # Фолбэк: если h2 нет, вставляем между абзацами <p>
+        p_matches = list(re.finditer(r"</p>", html_content, flags=re.IGNORECASE))
+        if p_matches:
+            step = max(2, len(p_matches) // (len(remaining_images) + 1))
+            offset = 0
+            for i, img_data in enumerate(remaining_images, start=1):
+                idx = min(i * step, len(p_matches) - 1)
+                pos = p_matches[idx].end() + offset
+                fig_html = make_figure(img_data)
+                html_content = html_content[:pos] + fig_html + html_content[pos:]
+                offset += len(fig_html)
 
     return html_content
 
 
 def strip_existing_images(html: str) -> str:
-    """Удаляет ранее вставленные теги <figure> и <img> со статьи перед повторной вставкой."""
     if not html:
         return ""
     cleaned = re.sub(
@@ -184,11 +202,5 @@ def strip_existing_images(html: str) -> str:
         '',
         html,
         flags=re.DOTALL | re.IGNORECASE
-    )
-    cleaned = re.sub(
-        r'<img[^>]*class="[^"]*seo-article__img[^"]*"[^>]*>',
-        '',
-        cleaned,
-        flags=re.IGNORECASE
     )
     return cleaned

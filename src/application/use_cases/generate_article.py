@@ -28,6 +28,13 @@ from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.utils.extract_data import remove_meta_block_from_html, convert_svg_to_png_bytes, normalize_logo_png, \
     extract_html_metadata
 
+
+from src.application.article_format import (
+    ensure_semantic_html,
+    inject_multiple_images_to_article,
+    normalize_article_html,
+)
+
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -181,7 +188,9 @@ class GenerateArticleUseCase:
 
             content = re.sub(r"cite[a-zA-Z0-9_:]+", "", content)
             content = re.sub(r"【\d+[:†]?\d*†?[^】]*】", "", content)
-            
+
+            content = ensure_semantic_html(content, topic=topic)
+
             content = normalize_article_html(content)
             h1_val, title_val, desc_val = extract_html_metadata(content, topic)
             content = remove_meta_block_from_html(content)
