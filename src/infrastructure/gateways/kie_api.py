@@ -1,6 +1,7 @@
 # src/infrastructure/gateways/kie_api.py
 
 import asyncio
+import json
 import re
 from typing import Any
 import httpx
@@ -8,12 +9,12 @@ import httpx
 from src.config.settings import settings
 
 
-def _clean_text_for_llm(text: str, max_chars: int = 35000) -> str:
-    """Удаляет непечатаемые символы, сохраняя структуру HTML и абзацев."""
+def _clean_text_for_llm(text: str, max_chars: int = 40000) -> str:
+    """Очищает текст, сохраняя структуру абзацев и заголовков."""
     if not text:
         return ""
 
-    cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]", "", text)
+    cleaned = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]", "", str(text))
     cleaned = re.sub(r"[^\S\r\n]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
@@ -24,168 +25,170 @@ def _clean_text_for_llm(text: str, max_chars: int = 35000) -> str:
 
 
 class KieApiGateway:
-    """Шлюз для генерации контента через KIE.AI GPT 5.6 Luna (/codex/v1/responses)."""
+    """Шлюз KIE.AI для Gemini 3.8 Flash (/gemini/v1/models/gemini-3-8-flash:streamGenerateContent)."""
 
     def __init__(self, http_client: httpx.AsyncClient):
         self._client = http_client
         self._api_key = settings.kie.API_KEY
         self._base_url = settings.kie.KIE_BASE_URL.rstrip('/')
-        self._endpoint = "/codex/v1/responses"
-        raw_model = settings.kie.CHAT_MODEL or "gpt-5-6-luna"
-        self._model = raw_model.replace(".", "-")
+        self._endpoint = "/gemini/v1/models/gemini-3-8-flash:streamGenerateContent"
 
-    def _format_input_for_luna(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Преобразует сообщения в формат input схемы GPT 5.6 Luna."""
-        formatted_input = []
+    def _format_contents_for_gemini(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Преобразует сообщения в структуру `contents` Gemini.
+        В Gemini разрешены только роли 'user' и 'model', они обязаны чередоваться.
+        """
+        merged_contents = []
+
         for msg in messages:
-            role = msg.get("role", "user")
-            if role in ("system", "developer"):
-                role = "developer"
+            raw_role = msg.get("role", "user")
+            role = "model" if raw_role == "assistant" else "user"
 
             content = msg.get("content", "")
-            content_parts = []
+            text_parts = []
 
             if isinstance(content, str):
-                clean_str = _clean_text_for_llm(content)
-                content_parts.append({"type": "input_text", "text": clean_str})
+                cleaned = _clean_text_for_llm(content)
+                if cleaned:
+                    text_parts.append(cleaned)
             elif isinstance(content, list):
                 for part in content:
-                    if isinstance(part, dict):
-                        p_type = part.get("type")
-                        if p_type in ("text", "input_text"):
-                            clean_str = _clean_text_for_llm(part.get("text", ""))
-                            content_parts.append({"type": "input_text", "text": clean_str})
-                        elif p_type in ("image_url", "input_image"):
-                            img_obj = part.get("image_url")
-                            img_url = img_obj.get("url", "") if isinstance(img_obj, dict) else str(img_obj or "")
-                            content_parts.append({"type": "input_image", "image_url": img_url})
-                        else:
-                            content_parts.append(part)
-                    else:
-                        content_parts.append({
-                            "type": "input_text",
-                            "text": _clean_text_for_llm(str(part))
-                        })
+                    if isinstance(part, dict) and "text" in part:
+                        cleaned = _clean_text_for_llm(part["text"])
+                        if cleaned:
+                            text_parts.append(cleaned)
+                    elif isinstance(part, str):
+                        cleaned = _clean_text_for_llm(part)
+                        if cleaned:
+                            text_parts.append(cleaned)
+
+            full_text = "\n\n".join(text_parts).strip()
+            if not full_text:
+                continue
+
+            # Склеиваем соседние сообщения одной роли, чтобы соблюсти чередование user -> model -> user
+            if merged_contents and merged_contents[-1]["role"] == role:
+                merged_contents[-1]["parts"][0]["text"] += f"\n\n{full_text}"
             else:
-                content_parts.append({
-                    "type": "input_text",
-                    "text": _clean_text_for_llm(str(content))
+                merged_contents.append({
+                    "role": role,
+                    "parts": [{"text": full_text}]
                 })
 
-            formatted_input.append({
-                "role": role,
-                "content": content_parts
-            })
+        # Защита: в диалоге должно быть хотя бы одно сообщение от user
+        if not merged_contents:
+            merged_contents.append({"role": "user", "parts": [{"text": "Привет"}]})
+        elif merged_contents[0]["role"] != "user":
+            merged_contents[0]["role"] = "user"
 
-        if formatted_input and not any(m["role"] == "user" for m in formatted_input):
-            formatted_input[-1]["role"] = "user"
+        return merged_contents
 
-        return formatted_input
+    def _extract_gemini_text(self, data: Any) -> str:
+        """Извлекает итоговый текст из ответа Gemini (поддерживает JSON и чанки)."""
+        # 1. Если пришел словарь с candidates
+        if isinstance(data, dict):
+            candidates = data.get("candidates") or []
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                text_list = [p["text"] for p in parts if isinstance(p, dict) and "text" in p]
+                if text_list:
+                    return "".join(text_list).strip()
 
-    def _extract_response(self, data: dict[str, Any]) -> tuple[str, str]:
-        """Извлекает сгенерированный текст и рассуждения из output."""
-        content_text = ""
-        reasoning_text = ""
+        # 2. Если пришел массив объектов
+        elif isinstance(data, list):
+            collected = []
+            for item in data:
+                if isinstance(item, dict):
+                    candidates = item.get("candidates") or []
+                    for c in candidates:
+                        parts = c.get("content", {}).get("parts", [])
+                        for p in parts:
+                            if isinstance(p, dict) and "text" in p:
+                                collected.append(p["text"])
+            if collected:
+                return "".join(collected).strip()
 
-        outputs = data.get("output") or []
-        for item in outputs:
-            item_type = item.get("type")
-
-            if item_type == "reasoning":
-                summary = item.get("summary") or []
-                if isinstance(summary, list):
-                    reasoning_text = "\n".join(str(s) for s in summary)
-                elif isinstance(summary, str):
-                    reasoning_text = summary
-
-            elif item_type == "message":
-                parts = item.get("content") or []
-                extracted_parts = []
-                for p in parts:
-                    if p.get("type") == "output_text":
-                        extracted_parts.append(p.get("text", ""))
-                    elif "text" in p:
-                        extracted_parts.append(p.get("text", ""))
-                content_text = "\n".join(extracted_parts).strip()
-
-        # Фолбек на случай choices
-        if not content_text and "choices" in data:
-            choices = data.get("choices") or []
-            if choices:
-                msg_obj = choices[0].get("message", {})
-                content_text = msg_obj.get("content", "").strip()
-                reasoning_text = msg_obj.get("reasoning_content", "").strip()
-
-        return content_text, reasoning_text
+        return ""
 
     async def generate_completion_with_reasoning(
             self,
             messages: list[dict[str, Any]],
-            reasoning_effort: str = "medium",
+            reasoning_effort: str = "low",
     ) -> tuple[str, str]:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json"
+            "X-Goog-Api-Key": self._api_key,
+            "Content-Type": "application/json",
         }
 
-        r_effort = str(reasoning_effort).lower()
-        if r_effort in ("high", "xhigh"):
-            effort = "high"
-        elif r_effort == "low":
-            effort = "low"
-        else:
-            effort = "medium"
-
+        # Настройки генерации Gemini
         payload = {
-            "model": self._model,
-            "stream": False,  # Обязательно False, иначе придет SSE стрим
-            "input": self._format_input_for_luna(messages),
-            "reasoning": {
-                "effort": effort
+            "stream": False,
+            "contents": self._format_contents_for_gemini(messages),
+            "generationConfig": {
+                "thinkingConfig": {
+                    "includeThoughts": False,
+                    "thinkingLevel": "low" if str(reasoning_effort).lower() == "low" else "high",
+                }
             }
         }
 
         url = f"{self._base_url}{self._endpoint}"
         max_retries = 3
-        last_error_text = ""
+        last_error = ""
 
         for attempt in range(1, max_retries + 1):
             try:
                 response = await self._client.post(url, json=payload, headers=headers, timeout=140.0)
 
                 if response.status_code == 200:
+                    raw_text = response.text.strip()
+
+                    if raw_text.startswith("data:") or "event:" in raw_text:
+                        full_parts = []
+                        for line in raw_text.split("\n"):
+                            line = line.strip()
+                            if line.startswith("data:"):
+                                chunk_str = line[5:].strip()
+                                if chunk_str and chunk_str != "[DONE]":
+                                    try:
+                                        chunk_json = json.loads(chunk_str)
+                                        part = self._extract_gemini_text(chunk_json)
+                                        if part:
+                                            full_parts.append(part)
+                                    except Exception:
+                                        pass
+                        content = "".join(full_parts).strip()
+                        if content:
+                            return content, ""
+
+                    # Стандартный JSON ответ
                     data = response.json()
-
-                    if data.get("code") and data.get("code") != 200:
-                        last_error_text = str(data)
-                        await asyncio.sleep(2.0 * attempt)
-                        continue
-
-                    content, reasoning = self._extract_response(data)
+                    content = self._extract_gemini_text(data)
                     if content:
-                        return content.strip(), reasoning.strip()
+                        return content, ""
 
-                    last_error_text = f"Empty content in GPT 5.6 Luna response: {data}"
+                    last_error = f"Пустой candidates в ответе Gemini: {data}"
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
                 if response.status_code in (500, 502, 503, 504, 429):
-                    last_error_text = response.text
+                    last_error = response.text
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
-                raise ValueError(f"Ошибка KIE.AI GPT 5.6 Luna ({response.status_code}): {response.text}")
+                raise ValueError(f"Ошибка KIE Gemini 3.8 Flash ({response.status_code}): {response.text}")
 
-            except httpx.RequestError as req_err:
-                last_error_text = str(req_err)
+            except httpx.RequestError as err:
+                last_error = str(err)
                 await asyncio.sleep(2.0 * attempt)
 
-        raise ValueError(f"Ошибка KIE.AI GPT 5.6 Luna после {max_retries} попыток: {last_error_text}")
+        raise ValueError(f"Ошибка Gemini 3.8 Flash после {max_retries} попыток: {last_error}")
 
     async def generate_completion(
             self,
             messages: list[dict[str, Any]],
-            reasoning_effort: str = "medium",
+            reasoning_effort: str = "low",
     ) -> str:
         content, _ = await self.generate_completion_with_reasoning(
             messages=messages,
@@ -197,13 +200,9 @@ class KieApiGateway:
             self,
             history: list[dict[str, Any]],
             user_prompt: str,
-            reasoning_effort: str = "medium",
+            reasoning_effort: str = "low",
     ) -> tuple[str, str, list[dict[str, Any]]]:
-        system_msgs = [m for m in history if m.get("role") in ("system", "developer")]
-        chat_msgs = [m for m in history if m.get("role") not in ("system", "developer")]
-
-        trimmed_history = system_msgs + chat_msgs[-6:]
-        updated_history = list(trimmed_history)
+        updated_history = list(history)
         updated_history.append({"role": "user", "content": user_prompt})
 
         content, reasoning = await self.generate_completion_with_reasoning(
@@ -232,8 +231,7 @@ class KieApiGateway:
         raw_faq = "\n---\n".join(struct.get('faq_blocks', []))
         faq_text = _clean_text_for_llm(raw_faq, max_chars=4000) or "Нет явных FAQ блоков"
 
-        raw_body = parsed_data.get('body_text', '')
-        clean_body = _clean_text_for_llm(raw_body, max_chars=12000)
+        clean_body = _clean_text_for_llm(parsed_data.get('body_text', ''), max_chars=12000)
 
         prompt = f"""
 Проведи глубокий коммерческий и LSA-анализ страницы конкурента {parsed_data.get('url')}:
