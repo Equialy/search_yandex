@@ -172,9 +172,9 @@ class KieApiGateway:
                     await asyncio.sleep(2.0 * attempt)
                     continue
 
-                if response.status_code in (500, 502, 503, 504, 429):
-                    last_error = response.text
-                    await asyncio.sleep(2.0 * attempt)
+                if response.status_code in (500, 502, 503, 504, 520, 521, 522, 524, 429):
+                    last_error = f"HTTP {response.status_code}"
+                    await asyncio.sleep(3.0 * attempt)
                     continue
 
                 raise ValueError(f"Ошибка KIE Gemini 3.8 Flash ({response.status_code}): {response.text}")

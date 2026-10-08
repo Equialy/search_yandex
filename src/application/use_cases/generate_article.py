@@ -216,7 +216,7 @@ class GenerateArticleUseCase:
 
             content, reasoning = (
                 await self._kie.generate_completion_with_reasoning(
-                    messages=messages, reasoning_effort="medium"
+                    messages=messages, reasoning_effort="low"
                 )
             )
 
