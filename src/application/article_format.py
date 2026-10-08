@@ -39,52 +39,34 @@ def normalize_article_html(html_text: str) -> str:
     return text.strip()
 
 
-def _convert_markdown_table(table_text: str) -> str:
-    """Конвертирует текст markdown-таблицы в HTML <table>."""
-    lines = [l.strip() for l in table_text.split("\n") if l.strip()]
-    if len(lines) < 2:
-        return table_text
-
-    table_html = ['<table class="seo-article__table">']
-    thead_done = False
-
-    for idx, line in enumerate(lines):
-        # Пропускаем строку-разделитель |---|---|
-        if re.match(r"^\|?[\s\:\-]+(?:\|[\s\:\-]+)+\|?$", line):
-            thead_done = True
-            continue
-
-        raw_cells = [c.strip() for c in line.strip("|").split("|")]
-        if not thead_done and idx == 0:
-            table_html.append("  <thead>\n    <tr>")
-            for c in raw_cells:
-                table_html.append(f"      <th>{c}</th>")
-            table_html.append("    </tr>\n  </thead>\n  <tbody>")
-        else:
-            table_html.append("    <tr>")
-            for c in raw_cells:
-                table_html.append(f"      <td>{c}</td>")
-            table_html.append("    </tr>")
-
-    if thead_done:
-        table_html.append("  </tbody>")
-    table_html.append("</table>")
-    return "\n".join(table_html)
+def _is_complete_html(text: str) -> bool:
+    """Проверяет, прислала ли модель готовую верстку (как Gemini)."""
+    lower = text.lower()
+    has_style = "<style" in lower
+    has_headings = "<h1" in lower and "<h2" in lower
+    has_paragraphs = lower.count("<p") >= 5
+    has_container = 'class="seo-article"' in lower or "class='seo-article'" in lower
+    return has_style and has_headings and has_paragraphs and has_container
 
 
 def ensure_semantic_html(raw_content: str, topic: str) -> str:
     """
-    Гарантирует красивый CSS и чистую HTML-разметку:
-    - Конвертирует ## и ### в <h2> и <h3>
-    - Преобразует markdown-таблицы в <table>
-    - Добавляет стили <style>, если модель их пропустила
+    Если модель (Gemini) УЖЕ прислала готовый валидный HTML со стилями — сохраняет его без искажений.
+    Если пришел голый текст — структурирует его.
     """
     if not raw_content:
         return ""
 
     text = normalize_article_html(raw_content)
 
-    # 1. Извлекаем или подставляем CSS-стили
+    # 1. ЕСЛИ ЭТО УЖЕ ГОТОВЫЙ HTML (КАК У GEMINI) — НЕ ТРОГАЕМ И НЕ ЛОМАЕМ ТАБЛИЦЫ
+    if _is_complete_html(text):
+        # Удаляем дублирующиеся обертки если есть
+        text = re.sub(r"<p>\s*<div", "<div", text, flags=re.IGNORECASE)
+        text = re.sub(r"</div>\s*</p>", "</div>", text, flags=re.IGNORECASE)
+        return text
+
+    # 2. ФОЛБЭК: восстанавливаем только если модель отдала сырой текст
     style_match = re.search(r"<style[^>]*>.*?</style>", text, flags=re.DOTALL | re.IGNORECASE)
     if style_match:
         style_block = style_match.group(0)
@@ -93,7 +75,6 @@ def ensure_semantic_html(raw_content: str, topic: str) -> str:
         style_block = DEFAULT_ARTICLE_STYLE
         body = text
 
-    # Очищаем инлайн markdown-разметку: **bold** и [link](url)
     body = re.sub(r"\*\*([^\*]+)\*\*", r"<strong>\1</strong>", body)
     body = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', body)
 
@@ -102,28 +83,16 @@ def ensure_semantic_html(raw_content: str, topic: str) -> str:
     h1_added = False
 
     for block in blocks:
-        # Пропускаем сырые метаданные Title/Description
         if re.match(r"^(title|description):", block, re.I):
-            continue
-
-        # Обработка Markdown-таблицы
-        if "|" in block and ("|---" in block or block.count("|") >= 4):
-            formatted_blocks.append(_convert_markdown_table(block))
             continue
 
         lines = [l.strip() for l in block.split("\n") if l.strip()]
 
-        # Списки
-        is_list = all(re.match(r"^(?:[\u2022\-\—\*\+]|\d+[\.\)])\s+", l) for l in lines) and len(lines) > 1
-        if is_list:
-            items_html = []
-            for l in lines:
-                clean_item = re.sub(r"^(?:[\u2022\-\—\*\+]|\d+[\.\)])\s*", "", l)
-                items_html.append(f"    <li>{clean_item}</li>")
-            formatted_blocks.append("  <ul>\n" + "\n".join(items_html) + "\n  </ul>")
+        # Если блок уже содержит HTML (div, table, ul, ol) — не заворачиваем в <p>!
+        if block.startswith(("<div", "<table", "<ul", "<ol", "<figure")):
+            formatted_blocks.append(block)
             continue
 
-        # Заголовки с решетками (### и ##)
         first_line = lines[0]
         if first_line.startswith("### "):
             clean_title = re.sub(r"^#+\s*", "", first_line)
@@ -150,7 +119,6 @@ def ensure_semantic_html(raw_content: str, topic: str) -> str:
         # Одиночные строки
         if len(lines) == 1:
             line = lines[0]
-            # Убираем решетки, если они попали внутрь тегов (например <h2>## Заголовок</h2>)
             line = re.sub(r"(<h[1-3][^>]*>)\s*#+\s*", r"\1", line)
             if line.startswith("<"):
                 formatted_blocks.append(f"  {line}")
@@ -168,9 +136,8 @@ def ensure_semantic_html(raw_content: str, topic: str) -> str:
             formatted_blocks.append(f"  <p>{line}</p>")
             continue
 
-        # Обычный абзац текста
+        # Обычный абзац
         merged_p = " ".join(lines)
-        merged_p = re.sub(r"</?(?:td|th|tr|tbody|thead|table)[^>]*>", "", merged_p)
         if merged_p.strip():
             formatted_blocks.append(f"  <p>{merged_p}</p>")
 
@@ -199,6 +166,7 @@ def inject_multiple_images_to_article(
             f'  </figure>\n'
         )
 
+    # Вставляем Hero-картинку после первого </h1>
     hero_figure = make_figure(images[0])
     remaining_images = images[1:]
 
@@ -212,6 +180,7 @@ def inject_multiple_images_to_article(
     if not remaining_images:
         return html_content
 
+    # Вставляем остальные картинки после <h2>
     h2_matches = list(re.finditer(r"</h2>", html_content, flags=re.IGNORECASE))
     if h2_matches:
         step = max(1, len(h2_matches) // (len(remaining_images) + 1))
@@ -222,17 +191,6 @@ def inject_multiple_images_to_article(
             fig_html = make_figure(img_data)
             html_content = html_content[:pos] + fig_html + html_content[pos:]
             offset += len(fig_html)
-    else:
-        p_matches = list(re.finditer(r"</p>", html_content, flags=re.IGNORECASE))
-        if p_matches:
-            step = max(2, len(p_matches) // (len(remaining_images) + 1))
-            offset = 0
-            for i, img_data in enumerate(remaining_images, start=1):
-                idx = min(i * step, len(p_matches) - 1)
-                pos = p_matches[idx].end() + offset
-                fig_html = make_figure(img_data)
-                html_content = html_content[:pos] + fig_html + html_content[pos:]
-                offset += len(fig_html)
 
     return html_content
 

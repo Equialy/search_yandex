@@ -157,6 +157,19 @@ class GenerateArticleUseCase:
             )
 
             primary_keyword = (project.keyword or topic).strip()
+            if competitor_lengths:
+                avg_chars = sum(competitor_lengths) // len(competitor_lengths)
+                target_chars = min(max(avg_chars, 5000), 20000)
+                min_chars = int(target_chars * 0.85)
+                max_chars = int(target_chars * 1.15)
+                
+                volume_instruction = f"""
+                    ТРЕБОВАНИЕ К ОБЪЕМУ СТАТЬИ:
+                    • Целевой ориентир: ~{target_chars} символов с пробелами (диапазон от {min_chars} до {max_chars} символов).
+                    • Статья должна быть полностью завершенной, с логическим заключением (не обрывайся на полуслове!).
+                    """
+            else:
+                volume_instruction = "ТРЕБОВАНИЕ К ОБЪЕМУ: Напиши развернутую статью объемом 6000–9000 символов с пробелами. Обязательно доведи мысль до конца."
 
             comp_summaries = []
             for c in project.competitors or []:
@@ -170,35 +183,31 @@ class GenerateArticleUseCase:
                 "Сразу начинай с первого абзаца статьи!"
             )
 
-            prompt = f"""{system_instruction}
+            prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
 
-Напиши готовую коммерческую SEO-статью / страницу услуги на тему '{topic}' для компании '{company_name}'.
+                    {target_data_prompt}
 
-{target_data_prompt}
+                    {volume_instruction}
 
-БАЗА ЗНАНИЙ И ДАННЫЕ КОНКУРЕНТОВ:
-{competitors_context}
+                    ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
+                    • В блоке meta:
+                        - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
+                        - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
 
-ТРЕБОВАНИЕ К ОБЪЕМУ:
-• Напиши ПОЛНУЮ развернутую статью объемом от 6000 до {target_chars} символов с пробелами.
-• Статья должна быть полностью завершена логическим коммерческим финалом.
+                    • ЗАГОЛОВОК H1:
+                        - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.
 
-ОБЯЗАТЕЛЬНАЯ СТРУКТУРА СТАТЬИ:
-• Title: {primary_keyword}
-• Description: 140-160 символов с ключом и выгодами
-• H1: {primary_keyword}
-• Первый абзац статьи: ОБЯЗАТЕЛЬНО содержит ключевой запрос '{primary_keyword}'.
-• Подробно распиши: суть услуги, кому подходит (ИП / ООО), этапы работы, почему это выгодно, частые ошибки и риски, финальный блок с призывом обратиться в компанию.
+                    • ПЕРВЫЙ АБЗАЦ СТАТЬИ:
+                        - В первом вводном абзаце (сразу после <h1>) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
+                        
+                    СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
+                    {SEO_GENERATE_ARTICLE}
 
-{SEO_GENERATE_ARTICLE}
+                    ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
+                    {instructions}
 
-ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ:
-{instructions}
-
-{ARTICLE_HTML_FORMAT_TEXT}
-
-ВАЖНО: Начни ответ НЕПОСРЕДСТВЕННО с блока <style> и сразу переходи к тексту. Никаких вступительных слов!
-"""
+                    {ARTICLE_HTML_FORMAT_TEXT}
+                    """
 
             messages = [
                 {"role": "developer", "content": system_instruction},
