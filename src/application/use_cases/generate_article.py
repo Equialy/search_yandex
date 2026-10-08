@@ -249,7 +249,7 @@ class GenerateArticleUseCase:
             content = normalize_article_html(content)
             content = ensure_semantic_html(content, topic=topic)
             h1_val, title_val, desc_val = extract_html_metadata(content, topic)
-            content = remove_meta_block_from_html(content)
+            # content = remove_meta_block_from_html(content)
 
             # 3. Расчет SEO-метрик
             clean_text = re.sub(
