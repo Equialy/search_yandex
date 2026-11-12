@@ -67,7 +67,6 @@ class DeepSeekGateway:
         return formatted
 
     def _extract_response(self, data: dict[str, Any]) -> tuple[str, str]:
-        """Извлекает итоговый текст и рассуждения из структуры ответа responses API."""
         content_parts = []
         reasoning_parts = []
 
@@ -92,7 +91,9 @@ class DeepSeekGateway:
         content = "".join(content_parts).strip()
         reasoning = "".join(reasoning_parts).strip()
 
-        # Очистка оберток markdown-кода (```html ... ```), если модель их добавила
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        # 2. Очистка оберток markdown-кода (```html ... ```)
         if content.startswith("```"):
             content = re.sub(r"^```(?:html|xml)?\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"\s*```$", "", content).strip()
@@ -231,4 +232,4 @@ class DeepSeekGateway:
 4. ВЫЖИМКА ТЕЗИСОВ ДЛЯ НАШЕЙ СТАТЬИ.
 """
         messages = [{"role": "user", "content": prompt}]
-        return await self.generate_completion(messages, reasoning_effort="low")
+        return await self.generate_completion(messages, reasoning_effort="none")
