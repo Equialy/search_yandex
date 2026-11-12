@@ -49,16 +49,16 @@ class GatewaysProvider(Provider):
         scope=Scope.APP,
     )
 
-    site_parser = provide(
-        SiteParserGateway,
-        scope=Scope.APP,
-    )
+    # site_parser = provide(
+    #     SiteParserGateway,
+    #     scope=Scope.APP,
+    # )
 
 
-    kie_gateway = provide(
-        KieApiGateway,
-        scope=Scope.APP,
-    )
+    # kie_gateway = provide(
+    #     KieApiGateway,
+    #     scope=Scope.APP,
+    # )
 
 
     openai_gateway = provide(
