@@ -40,7 +40,7 @@ class TextAiService:
             {"role": "user", "content": text}
         ]
 
-        raw_content = await self.openai.generate_completion(messages, reasoning_effort="low")
+        raw_content = await self.openai.generate_completion(messages, reasoning_effort="none")
         raw_content = raw_content.strip()
 
         if "```" in raw_content:

@@ -110,15 +110,17 @@ class DeepSeekGateway:
             "Content-Type": "application/json",
         }
 
-        effort = str(reasoning_effort).lower()
-        if effort not in self.ALLOWED_EFFORT:
-            effort = "low" if effort in ("minimal", "low") else "high"
+
+
+        # effort = str(reasoning_effort).lower()
+        # if effort not in self.ALLOWED_EFFORT:
+        #     effort = "low" if effort in ("minimal", "low") else "high"
 
         payload = {
             "model": self._model,
             "stream": False,
             "input": self._format_input(messages),
-            "reasoning": {"effort": effort},
+            "reasoning": {"effort": "none"},
         }
 
         url = f"{self._base_url}{self._endpoint}"
