@@ -28,41 +28,77 @@ class ImageKieGenerationGateway:
         res.raise_for_status()
 
         resp = res.json()
-        download_url = resp.get("data", {}).get("downloadUrl") or resp.get("data", {}).get("fileUrl")
+        download_url = (resp.get("data") or {}).get("downloadUrl") or (resp.get("data") or {}).get("fileUrl")
         if not download_url:
             raise ValueError(f"CDN upload failed: {resp}")
 
-        # ЛОГИРУЕМ ССЫЛКУ С CDN
         print(
-            f"\n================ [CDN LOGO URL] ================\n{download_url}\n================================================\n")
+            f"\n================ [CDN LOGO URL] ================\n{download_url}\n================================================\n"
+        )
         return download_url
 
     async def generate_and_save_image(
-            self,
-            prompt: str,
-            filename_prefix: str = "article_img",
-            size: str = "1024x1024",
-            image_url: str | None = None,
+        self,
+        prompt: str,
+        filename_prefix: str = "article_img",
+        size: str = "1024x1024",
+        image_url: str | None = None,
     ) -> str:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
+        aspect_ratio = "16:9" if "16:9" in size or "1792" in size else "1:1"
 
-        payload = {
-            "model": self._model,
-            "input": {
+        if "flux-3" in self._model.lower():
+            if image_url:
+                api_model = "flux-3/klein-edit-image"
+                edit_prompt = f"{prompt} (use the company logo from image 1)"
+                input_payload = {
+                    "prompt": edit_prompt,
+                    "aspect_ratio": aspect_ratio,
+                    "image_urls": [image_url],
+                    "resolution": "1K",
+                    "output_format": "png",
+                    "enhance_prompt": False,
+                }
+            else:
+                api_model = "flux-3/klein-text-to-image"
+                input_payload = {
+                    "prompt": prompt,
+                    "aspect_ratio": aspect_ratio,
+                    "resolution": "1K",
+                    "output_format": "png",
+                    "enhance_prompt": True,
+                }
+        else:
+            api_model = self._model
+            input_payload = {
                 "prompt": prompt,
-                "aspect_ratio": "16:9" if "16:9" in size or "1792" in size else "1:1",
+                "aspect_ratio": aspect_ratio,
                 "image_input": [image_url] if image_url else [],
                 "resolution": "1K",
-                "output_format": "png"
+                "output_format": "png",
             }
+
+        payload = {
+            "model": api_model,
+            "input": input_payload,
         }
-        res = await self._http.post(f"{self._base_url}/api/v1/jobs/createTask", json=payload, headers=headers,
-                                    timeout=30.0)
+
+        res = await self._http.post(
+            f"{self._base_url}/api/v1/jobs/createTask",
+            json=payload,
+            headers=headers,
+            timeout=250.0,
+        )
         res.raise_for_status()
-        task_id = res.json().get("data", {}).get("taskId")
+
+        res_data = res.json()
+        if res_data.get("code") != 200:
+            raise ValueError(f"KIE error {res_data.get('code')}: {res_data.get('msg')}")
+
+        task_id = (res_data.get("data") or {}).get("taskId")
         if not task_id:
             raise ValueError(f"Task creation failed: {res.text}")
 
@@ -74,7 +110,7 @@ class ImageKieGenerationGateway:
                 f"{self._base_url}/api/v1/jobs/recordInfo",
                 params={"taskId": task_id},
                 headers=headers,
-                timeout=15.0
+                timeout=100.0,
             )
             if poll_res.status_code == 200:
                 data = poll_res.json().get("data") or {}
