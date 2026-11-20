@@ -23,6 +23,7 @@ class ArticleDraftGenerator(Protocol):
         topic: str,
         primary_keyword: str,
         company_name: str,
+        brand_context: str = "",
         instructions: str,
         volume: ArticleVolumeTarget,
         competitors_block: str,

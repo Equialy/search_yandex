@@ -56,15 +56,17 @@ class GenerateArticleInteractor:
         competitors_block = build_competitors_block(competitors)
 
         # 3. Генерация черновика
+        brand_context = brand.brand_fact_sheet.to_prompt_block() if brand.brand_fact_sheet else ""
+
         raw_html, reasoning, prompt = await self._draft_generator.generate_draft(
             topic=dto.topic,
             primary_keyword=primary_keyword,
             company_name=brand.company_name,
+            brand_context=brand_context,
             instructions=dto.instructions,
             volume=volume,
             competitors_block=competitors_block,
         )
-
         # 4. Harness-верификация и самоисправление ДО генерации картинок
         report = await self._verifier.verify_and_refine(
             raw_html,

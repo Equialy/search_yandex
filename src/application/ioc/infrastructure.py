@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from src.config.settings import settings
 from src.infrastructure.database.engine import new_engine, new_session_maker
 from src.application.uow import UnitOfWork, UnitOfWorkProtocol
-
+import redis.asyncio as aioredis
 
 class InfrastructureProvider(Provider):
 
@@ -17,6 +17,14 @@ class InfrastructureProvider(Provider):
         engine = new_engine(settings.db)
         yield engine
         await engine.dispose()
+
+
+    
+    @provide(scope=Scope.APP)
+    async def get_redis_client(self) -> AsyncGenerator[aioredis.Redis, None]:
+        client = aioredis.from_url(settings.redis.backend_url, decode_responses=True)
+        yield client
+        await client.aclose()
 
 
     @provide(scope=Scope.APP)

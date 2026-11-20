@@ -27,12 +27,21 @@ from src.infrastructure.gateways.image_kie_gateway import ImageKieGenerationGate
 from src.infrastructure.gateways.kie_api import KieApiGateway
 from src.infrastructure.gateways.site_parser import SiteParserGateway
 from src.utils.extract_data import convert_svg_to_png_bytes
+import redis.asyncio as aioredis
+from urllib.parse import urlparse
+from src.application.use_cases.generate_article.dto import (
+    ArticleVolumeTarget,
+    BrandFactSheet,
+    BrandLinkDTO,
+    TargetSiteContext,
+)
 
 logger = logging.getLogger(__name__)
 
 EXPORTS_ARTICLES_DIR = BASE_DIR / "exports" / "articles"
 EXPORTS_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
-
+_ABOUT_LINK_RE = re.compile(r"(?:about|company|o-kompanii|o_kompanii|kompaniya|kontakty|contacts|licenz)", re.I)
+BRAND_CACHE_TTL_SECONDS = 60 * 60 * 48  # 48 часов
 
 def build_target_site_parse(url: str, parsed: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -95,38 +104,198 @@ def build_competitors_block(competitors: list[CompetitorData], per_site_limit: i
 
 
 class TargetBrandService:
-    """Парсит сайт заказчика и загружает логотип на CDN."""
+    """Парсит сайт заказчика (главная + о компании), извлекает BrandFactSheet, перелинковку и грузит логотип на CDN."""
 
     def __init__(
         self,
         parser_gateway: SiteParserGateway,
         image_gateway: ImageKieGenerationGateway,
         http_client: httpx.AsyncClient,
+        ai_gateway: KieApiGateway,
+        redis_client: aioredis.Redis,
     ):
         self._parser = parser_gateway
         self._image_gateway = image_gateway
         self._http = http_client
+        self._ai = ai_gateway
+        self._redis = redis_client
 
     async def resolve(self, target_site: str) -> TargetSiteContext:
-        company_name = target_site or "Наша компания"
+        fallback_name = target_site or "Наша компания"
         if not target_site or not target_site.startswith("http"):
             return TargetSiteContext(
                 target_site=target_site or None,
                 target_site_parse=None,
                 cdn_logo_url=None,
-                company_name=company_name,
+                company_name=fallback_name,
+                brand_fact_sheet=None,
             )
 
-        parsed = await self._parser.parse_site_to_graph(target_site)
-        site_parse = build_target_site_parse(target_site, parsed)
-        cdn_logo_url = await self._upload_logo(parsed.get("logo_url"))
+        domain = urlparse(target_site).netloc.lower().removeprefix("www.")
+        cache_key = f"brand:profile:v1:{domain}"
+
+        # 1. Пробуем достать готовый профиль из Redis
+        try:
+            cached_raw = await self._redis.get(cache_key)
+            if cached_raw:
+                cached = json.loads(cached_raw)
+                fact_sheet = BrandFactSheet.model_validate(cached["brand_fact_sheet"])
+                logger.info("[TargetBrandService] Профиль бренда '%s' взят из Redis-кэша.", fact_sheet.company_name)
+                return TargetSiteContext(
+                    target_site=target_site,
+                    target_site_parse=cached.get("target_site_parse"),
+                    cdn_logo_url=cached.get("cdn_logo_url"),
+                    company_name=fact_sheet.company_name or fallback_name,
+                    brand_fact_sheet=fact_sheet,
+                )
+        except Exception as err:
+            logger.debug("[TargetBrandService] Redis read error: %s", err)
+
+        # 2. Парсим главную/целевую страницу
+        parsed_main = await self._parser.parse_site_to_graph(target_site)
+        site_parse = build_target_site_parse(target_site, parsed_main)
+        cdn_logo_url = await self._upload_logo(parsed_main.get("logo_url"))
+
+        # 3. Если есть страница «О компании» / «Контакты», добираем факты с неё
+        about_parsed: dict[str, Any] | None = None
+        all_links: list[dict[str, str]] = list(parsed_main.get("internal_links") or [])
+        about_candidate = next(
+            (lnk["url"] for lnk in all_links if _ABOUT_LINK_RE.search(lnk["url"])),
+            None,
+        )
+        if about_candidate and about_candidate.rstrip("/") != target_site.rstrip("/"):
+            about_parsed = await self._parser.parse_site_to_graph(about_candidate)
+            for lnk in (about_parsed.get("internal_links") or []):
+                if all(existing["url"] != lnk["url"] for existing in all_links):
+                    all_links.append(lnk)
+
+        # 4. Собираем подтверждённые контакты и извлекаем BrandFactSheet через LLM
+        fact_sheet = await self._build_fact_sheet(
+            target_site=target_site,
+            domain=domain,
+            parsed_main=parsed_main,
+            about_parsed=about_parsed,
+            candidate_links=all_links,
+        )
+
+        # 5. Кэшируем в Redis на 48 часов
+        try:
+            cache_payload = {
+                "target_site_parse": {
+                    **site_parse,
+                    "raw_text": (site_parse.get("raw_text") or "")[:6000],
+                },
+                "cdn_logo_url": cdn_logo_url,
+                "brand_fact_sheet": fact_sheet.model_dump(),
+            }
+            await self._redis.set(
+                cache_key,
+                json.dumps(cache_payload, ensure_ascii=False),
+                ex=BRAND_CACHE_TTL_SECONDS,
+            )
+        except Exception as err:
+            logger.debug("[TargetBrandService] Redis write error: %s", err)
 
         return TargetSiteContext(
             target_site=target_site,
             target_site_parse=site_parse,
             cdn_logo_url=cdn_logo_url,
-            company_name=company_name,
+            company_name=fact_sheet.company_name or fallback_name,
+            brand_fact_sheet=fact_sheet,
         )
+
+    async def _build_fact_sheet(
+        self,
+        *,
+        target_site: str,
+        domain: str,
+        parsed_main: dict[str, Any],
+        about_parsed: dict[str, Any] | None,
+        candidate_links: list[dict[str, str]],
+    ) -> BrandFactSheet:
+        contacts_main = parsed_main.get("contacts") or {}
+        contacts_about = (about_parsed or {}).get("contacts") or {}
+
+        phones = list(dict.fromkeys([*(contacts_main.get("phones") or []), *(contacts_about.get("phones") or [])]))[:4]
+        emails = list(dict.fromkeys([*(contacts_main.get("emails") or []), *(contacts_about.get("emails") or [])]))[:3]
+
+        # Отбираем ссылки на услуги/разделы (исключая саму about/contacts), максимум 20 кандидатов для LLM
+        service_links = [
+            lnk for lnk in candidate_links
+            if not _ABOUT_LINK_RE.search(lnk["url"])
+        ][:20]
+        allowed_urls = {lnk["url"]: lnk["anchor"] for lnk in service_links}
+
+        main_text = (parsed_main.get("clean_text") or "")[:5000]
+        about_text = ((about_parsed or {}).get("clean_text") or "")[:4000]
+        links_text = "\n".join(f"- {lnk['anchor']} | {lnk['url']}" for lnk in service_links) or "Нет ссылок"
+
+        prompt = f"""Извлеки фактическую карточку компании с её сайта ({target_site}).
+ЗАПРЕЩЕНО выдумывать факты, цифры, лицензии или ссылки. Используй ТОЛЬКО то, что есть в тексте ниже.
+
+TITLE ГЛАВНОЙ: {parsed_main.get("title", "")}
+DESCRIPTION: {parsed_main.get("description", "")}
+
+ТЕКСТ ГЛАВНОЙ СТРАНИЦЫ:
+{main_text}
+
+ТЕКСТ СТРАНИЦЫ «О КОМПАНИИ / КОНТАКТЫ»:
+{about_text}
+
+ДОСТУПНЫЕ ВНУТРЕННИЕ ССЫЛКИ ДЛЯ ПЕРЕЛИНКОВКИ:
+{links_text}
+
+Верни СТРОГО валидный JSON без markdown-обёрток:
+{{
+  "company_name": "Короткое реальное название бренда/компании без URL (например: ООО «Интех» или Интех)",
+  "city_or_region": "Город или регион работы (пусто, если не указан)",
+  "services_summary": "1-2 предложения: на чём специализируется компания",
+  "usp_and_experience": ["Факт 1: лет на рынке / лицензия / гарантия / сертификат / СРО", "Факт 2..."],
+  "selected_links": [
+    {{"url": "точная ссылка из списка выше", "anchor": "естественный анкор"}}
+  ]
+}}
+В selected_links выбери 3-5 самых полезных страниц смежных услуг/разделов строго из списка выше."""
+
+        try:
+            raw = await self._ai.generate_completion(
+                [{"role": "user", "content": prompt}],
+                reasoning_effort="none",
+            )
+            cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            data = json.loads(json_match.group(0) if json_match else cleaned)
+
+            # Белый список URL: не пропускаем ни одной выдуманной ссылки
+            verified_links: list[BrandLinkDTO] = []
+            for item in data.get("selected_links") or []:
+                u = str(item.get("url") or "").strip().rstrip("/")
+                if u in allowed_urls:
+                    anchor = str(item.get("anchor") or allowed_urls[u]).strip()
+                    verified_links.append(BrandLinkDTO(url=u, anchor=anchor))
+                if len(verified_links) >= 5:
+                    break
+
+            if not verified_links:
+                verified_links = [BrandLinkDTO(**lnk) for lnk in service_links[:4]]
+
+            return BrandFactSheet(
+                company_name=str(data.get("company_name") or domain).strip(),
+                city_or_region=str(data.get("city_or_region") or "").strip(),
+                phones=phones,
+                emails=emails,
+                usp_and_experience=[str(x).strip() for x in (data.get("usp_and_experience") or []) if str(x).strip()][:6],
+                services_summary=str(data.get("services_summary") or "").strip(),
+                internal_links=verified_links,
+            )
+        except Exception as err:
+            logger.warning("[TargetBrandService] BrandFactSheet LLM fallback: %s", err)
+            return BrandFactSheet(
+                company_name=domain,
+                phones=phones,
+                emails=emails,
+                internal_links=[BrandLinkDTO(**lnk) for lnk in service_links[:4]],
+            )
 
     async def _upload_logo(self, logo_url: str | None) -> str | None:
         if not logo_url:
@@ -156,37 +325,47 @@ class LlmArticleDraftGenerator:
         topic: str,
         primary_keyword: str,
         company_name: str,
+        brand_context: str,
         instructions: str,
         volume: ArticleVolumeTarget,
         competitors_block: str,
     ) -> tuple[str, str, str]:
+        brand_block = (
+            f"\nДАННЫЕ О КОМПАНИИ ЗАКАЗЧИКА (используй реальный город, факты доверия, контакты и перелинковку):\n"
+            f"{brand_context}\n"
+            if brand_context
+            else ""
+        )
         system_instruction = (
             "Ты — профессиональный Senior SEO-копирайтер. Твоя задача — СРАЗУ выдать ПОЛНЫЙ готовый текст статьи. "
             "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать планы, обещания, комментарии («сейчас напишу», «затем соберу», «я учту»). "
             "Сразу начинай с первого абзаца статьи!"
         )
-        prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
+        prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'  .
 
-{volume.prompt_instruction}
-{competitors_block}
-ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
-• В блоке meta:
-    - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
-    - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
+            {volume.prompt_instruction}
 
-• ЗАГОЛОВОК H1:
-    - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.
+            {brand_block}
 
-• ПЕРВЫЙ АБЗАЦ СТАТЬИ:
-    - В первом вводном абзаце (сразу после <h1>) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
+            {competitors_block}
+            ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
+            • В блоке meta:
+                - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
+                - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
 
-СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
-{SEO_GENERATE_ARTICLE}
+            • ЗАГОЛОВОК H1:
+                - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.
 
-ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
-{instructions}
+            • ПЕРВЫЙ АБЗАЦ СТАТЬИ:
+                - В первом вводном абзаце (сразу после <h1>) ОБЯЗАТЕЛЬНО должен присутствовать главный ключ '{primary_keyword}' в естественной форме.
 
-{ARTICLE_HTML_FORMAT_TEXT}"""
+            СТРОГИЕ ПРАВИЛА И СТРУКТУРА:
+            {SEO_GENERATE_ARTICLE}
+
+            ДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОЛЬЗОВАТЕЛЯ:
+            {instructions}
+
+            {ARTICLE_HTML_FORMAT_TEXT}"""
 
         messages = [
             {"role": "developer", "content": system_instruction},

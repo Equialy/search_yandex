@@ -1,10 +1,9 @@
 import logging
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import httpx
 from bs4 import BeautifulSoup, Tag
-
 from src.utils.extract_data import _extract_logo_url
 
 try:
@@ -45,6 +44,85 @@ _GARBAGE_TEXT_PATTERN = re.compile(
 _TILDA_TEXT_CLASSES = frozenset({
     "tn-atom", "t-descr", "t-text", "t-title", "t-name", "t-card__descr", "t-card__text"
 })
+
+_JUNK_LINK_PATTERNS = re.compile(
+    r"(?:politika|privacy|policy|consent|soglasie|terms|oferta|cookie|"
+    r"login|auth|register|cart|basket|checkout|search|wp-json|bitrix|tel:|mailto:|javascript:)",
+    re.I,
+)
+_PHONE_RE = re.compile(r"(?:\+7|8)[\s\-\(]*\d{3}[\s\-\)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}")
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}")
+
+def _extract_contacts_and_links(
+    soup: BeautifulSoup,
+    base_url: str,
+) -> tuple[dict[str, list[str]], list[dict[str, str]]]:
+    """Собирает контакты и внутренние ссылки ДО очистки DOM (включая header/nav/footer)."""
+    phones: list[str] = []
+    seen_phone_digits: set[str] = set()
+    emails: list[str] = []
+    seen_emails: set[str] = set()
+
+    def _add_phone(raw: str) -> None:
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) == 11 and digits not in seen_phone_digits:
+            seen_phone_digits.add(digits)
+            phones.append(raw.strip())
+
+    def _add_email(raw: str) -> None:
+        low = raw.strip().lower()
+        if low not in seen_emails and not low.endswith((".png", ".jpg", ".webp", ".svg")):
+            seen_emails.add(low)
+            emails.append(low)
+
+    for a in soup.find_all("a", href=True):
+        href = str(a["href"]).strip()
+        if href.startswith("tel:"):
+            _add_phone(href.removeprefix("tel:"))
+        elif href.startswith("mailto:"):
+            _add_email(href.removeprefix("mailto:").split("?")[0])
+
+    raw_page_text = soup.get_text(" ", strip=True)
+    for m in _PHONE_RE.findall(raw_page_text):
+        _add_phone(m)
+        if len(phones) >= 4:
+            break
+    for m in _EMAIL_RE.findall(raw_page_text):
+        _add_email(m)
+        if len(emails) >= 3:
+            break
+
+    base_parsed = urlparse(base_url)
+    base_host = base_parsed.netloc.lower().removeprefix("www.")
+    base_clean = f"{base_parsed.scheme}://{base_parsed.netloc}{base_parsed.path.rstrip('/')}"
+
+    internal_links: list[dict[str, str]] = []
+    seen_urls: set[str] = {base_clean}
+
+    for a in soup.find_all("a", href=True):
+        href = str(a["href"]).strip()
+        if not href or href.startswith("#") or _JUNK_LINK_PATTERNS.search(href):
+            continue
+
+        full_url = urljoin(base_url, href).split("#")[0].rstrip("/")
+        parsed_link = urlparse(full_url)
+        link_host = parsed_link.netloc.lower().removeprefix("www.")
+
+        if parsed_link.scheme not in ("http", "https") or link_host != base_host:
+            continue
+        if not _is_scrapeable_url(full_url) or full_url in seen_urls:
+            continue
+
+        anchor = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        if not (4 <= len(anchor) <= 90) or _PHONE_RE.fullmatch(anchor) or "http" in anchor.lower():
+            continue
+
+        seen_urls.add(full_url)
+        internal_links.append({"url": full_url, "anchor": anchor})
+        if len(internal_links) >= 35:
+            break
+
+    return {"phones": phones[:4], "emails": emails[:3]}, internal_links
 
 
 def _is_scrapeable_url(url: str) -> bool:
@@ -151,6 +229,8 @@ class SiteParserGateway:
                         meta_desc = val.strip()
 
                 final_desc = meta_desc or fallback_desc or ""
+                contacts, internal_links = _extract_contacts_and_links(soup, url)
+
 
                 content_root = _clean_dom(soup)
 
