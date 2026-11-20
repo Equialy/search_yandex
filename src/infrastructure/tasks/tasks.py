@@ -9,9 +9,12 @@ from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.application.uow import UnitOfWorkProtocol
 from src.infrastructure.database.models.tasks import TaskStatus
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
-from src.application.use_cases.generate_article import GenerateArticleUseCase
-from src.utils.extract_data import extract_html_metadata, remove_meta_block_from_html
-
+from src.utils.extract_data import  remove_meta_block_from_html
+import redis.asyncio as aioredis
+from src.application.use_cases.generate_article import (
+    GenerateArticleDTO,
+    GenerateArticleInteractor,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +34,7 @@ async def generate_full_article_pipeline_task(
     project_id_str: str | None = None,
     uow: FromDishka[UnitOfWorkProtocol] = None,
     analyze_uc: FromDishka[AnalyzeCompetitorsUseCase] = None,
-    generate_uc: FromDishka[GenerateArticleUseCase] = None,
+    generate_interactor: FromDishka[GenerateArticleInteractor] = None,
 ):
     logger.info(
         "[Pipeline Task] ▶ START | task_id=%s | user_id=%s | keyword='%s'",
@@ -72,12 +75,14 @@ async def generate_full_article_pipeline_task(
             await uow.commit()
 
         logger.info("[Pipeline Task]  [2/3] Запуск генерации статьи (тема: '%s')...", final_topic)
-        gen_result = await generate_uc.execute(
-            project_id=project_id,
-            topic=final_topic,
-            instructions=instructions or "",
-            target_site=target_site or "",
-            user_id=user_id,
+        gen_result = await generate_interactor(
+            GenerateArticleDTO(
+                project_id=project_id,
+                topic=final_topic,
+                instructions=instructions or "",
+                target_site=target_site or "",
+                user_id=user_id,
+            )
         )
         logger.info(
             "[Pipeline Task] [2/3] Статья создана | article_id=%s",
@@ -119,10 +124,9 @@ async def generate_reports_article_pipeline_task(
     topic: str | None = None,
     uow: FromDishka[UnitOfWorkProtocol] = None,
     analyze_uc: FromDishka[AnalyzeCompetitorsUseCase] = None,
-    generate_uc: FromDishka[GenerateArticleUseCase] = None,
+    generate_interactor: FromDishka[GenerateArticleInteractor] = None,
     reports_gateway: FromDishka[ReportsArticleGateway] = None,
 ):
-    from src.application.services.reports_api.poller import _ACTIVE_TASKS
 
     logger.info(
         "[Reports Task] ▶ START | id_task=%d | site_key='%s' | domain='%s'",
@@ -156,12 +160,14 @@ async def generate_reports_article_pipeline_task(
 
         # 3. Генерация статьи
         logger.info("[Reports Task]  [2/3] Генерация статьи для '%s'...", target_site)
-        gen_result = await generate_uc.execute(
-            project_id=project_id,
-            topic=final_topic,
-            instructions=instructions or "",
-            target_site=target_site,
-            user_id=user_id,
+        gen_result = await generate_interactor(
+            GenerateArticleDTO(
+                project_id=project_id,
+                topic=final_topic,
+                instructions=instructions or "",
+                target_site=target_site,
+                user_id=user_id,
+            )
         )
 
         article = gen_result.article
@@ -177,7 +183,7 @@ async def generate_reports_article_pipeline_task(
         base_public_url = settings.base_url.rstrip("/")
 
         public_html_content = (
-            article.content
+            clean_html_content
             .replace('src="/static/', f'src="{base_public_url}/static/')
             .replace("src='/static/", f"src='{base_public_url}/static/")
         )
@@ -201,4 +207,12 @@ async def generate_reports_article_pipeline_task(
     except Exception as e:
         logger.exception(" [Reports Task] ОШИБКА | id_task=%d | error=%s", id_task, e)
     finally:
-        _ACTIVE_TASKS.discard(id_task)
+        redis_client = None
+        try:
+            redis_client = aioredis.from_url(settings.redis.backend_url, decode_responses=True)
+            await redis_client.delete(f"reports:task_lock:{id_task}")
+        except Exception as lock_err:
+            logger.warning("[Reports Task] Не удалось снять Redis lock для #%d: %s", id_task, lock_err)
+        finally:
+            if redis_client is not None:
+                await redis_client.aclose()

@@ -14,7 +14,6 @@ from src.infrastructure.database.models import User
 
 router = APIRouter(prefix="/v1/agent", tags=["SEO Agent"], route_class=DishkaRoute)
 
-
 @router.post(
     "/chat",
     summary="Чат с SEO-агентом (LLM + инструменты анализа/статьи)",
@@ -22,28 +21,21 @@ router = APIRouter(prefix="/v1/agent", tags=["SEO Agent"], route_class=DishkaRou
 async def agent_chat(
     payload: schemas.AgentChatRequest,
     use_case: FromDishka[AgentChatUseCase],
-        user: FromDishka[User],
+    user: FromDishka[User],
 ):
     messages = [{"role": m.role, "content": m.content} for m in payload.messages]
 
     async def event_stream():
-        async for event in use_case.stream(messages):
+        async for event in use_case.stream(
+            messages,
+            chat_id=payload.chat_id,
+            user_id=user.id,
+        ):
             yield (
                 f"event: {event['type']}\n"
                 f"data: {json.dumps(event.get('data') or {}, ensure_ascii=False)}\n\n"
             )
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
-
-
+        
 
 @router.get("/chats", response_model=list[schemas.AgentChatListItemDTO], summary="Получить список всех сессий чата Агента из БД")
 async def list_agent_chats(uow: FromDishka[UnitOfWorkProtocol],   user: FromDishka[User],):

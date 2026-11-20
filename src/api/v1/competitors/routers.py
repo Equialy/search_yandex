@@ -12,12 +12,16 @@ from src.application.services.competitors.project_history import (
 )
 from src.application.use_cases.analyze_competitors import AnalyzeCompetitorsUseCase
 from src.application.use_cases.chat_context import ContinueContextChatUseCase
-from src.application.use_cases.generate_article import GenerateArticleUseCase, build_target_site_parse
+from src.application.use_cases.generate_article import  build_target_site_parse
 from src.application.use_cases.get_project import GetProjectUseCase
 from src.application.use_cases.list_projects import ListProjectsUseCase
 from src.infrastructure.database.models import User
 from src.infrastructure.gateways.site_parser import SiteParserGateway
-
+from src.application.use_cases.generate_article import (
+    GenerateArticleDTO,
+    GenerateArticleInteractor,
+    build_target_site_parse,
+)
 router = APIRouter(prefix="/v1/competitors", tags=["Competitor Analysis"], route_class=DishkaRoute)
 
 MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024
@@ -68,16 +72,18 @@ async def analyze_competitors(
 async def generate_article(
     project_id: uuid.UUID,
     payload: schemas.GenerateArticleRequest,
-    use_case: FromDishka[GenerateArticleUseCase],
+    interactor: FromDishka[GenerateArticleInteractor],
     user: FromDishka[User],
 ):
     try:
-        result = await use_case.execute(
-            project_id=project_id,
-            topic=payload.topic,
-            instructions=payload.instructions,
-            target_site=payload.target_site,
-            user_id=user.id
+        result = await interactor(
+            GenerateArticleDTO(
+                project_id=project_id,
+                topic=payload.topic,
+                instructions=payload.instructions,
+                target_site=payload.target_site or "",
+                user_id=user.id,
+            )
         )
         parse_dto = None
         if result.target_site_parse:

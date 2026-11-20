@@ -1,15 +1,17 @@
 import asyncio
 import logging
+import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
+from src.config.settings import settings
 from src.infrastructure.database.models.users import User, UserRole
 from src.infrastructure.gateways.reports_article import ReportsArticleGateway
 from src.infrastructure.tasks.tasks import generate_reports_article_pipeline_task
 
 logger = logging.getLogger(__name__)
 
-_ACTIVE_TASKS: set[int] = set()
+LOCK_TTL_SECONDS = 1800
 
 
 async def _get_default_admin_id(session_maker: async_sessionmaker[AsyncSession]) -> str:
@@ -36,42 +38,43 @@ async def start_reports_polling_loop(
     1. Опрашивает Reports API раз в 60 секунд.
     2. При наличии задачи отправляет ее на генерацию (4 сайта конкурентов).
     """
-    logger.info(" [Reports Poller] Запущен фоновый опросник API (интервал: %d сек)...", poll_interval_seconds)
+    logger.info("[Reports Poller] Запущен фоновый опросник API (интервал: %d сек)...", poll_interval_seconds)
+    redis_client = aioredis.from_url(settings.redis.backend_url, decode_responses=True)
 
-    while True:
-        try:
-            response = await gateway.get_task()
+    try:
+        while True:
+            try:
+                response = await gateway.get_task()
 
-            if response.success and response.task and response.task.id_task:
-                task = response.task
-                task_id = task.id_task
+                if response.success and response.task and response.task.id_task:
+                    task = response.task
+                    task_id = task.id_task
+                    lock_key = f"reports:task_lock:{task_id}"
 
-                if task_id in _ACTIVE_TASKS:
-                    logger.debug("[Reports Poller] Задача #%d уже находится в процессе генерации, пропускаем...", task_id)
-                else:
-                    logger.info(
-                        " [Reports Poller] Найдена новая задача #%d | Ключ: '%s' | Домен: '%s'",
-                        task_id, task.site_key, task.domain
-                    )
+                    acquired = await redis_client.set(lock_key, "1", nx=True, ex=LOCK_TTL_SECONDS)
+                    if not acquired:
+                        logger.debug("[Reports Poller] Задача #%d уже в работе (Redis lock), пропускаем...", task_id)
+                    else:
+                        try:
+                            admin_user_id = await _get_default_admin_id(session_maker)
+                            await generate_reports_article_pipeline_task.kiq(
+                                id_task=task_id,
+                                user_id_str=admin_user_id,
+                                site_key=task.site_key or "",
+                                domain=task.domain or "",
+                                instructions=task.text_comment or "",
+                                sites_limit=4,
+                                topic=task.site_key,
+                            )
+                            logger.info("[Reports Poller] Задача #%d отправлена в очередь!", task_id)
+                        except Exception:
+                            await redis_client.delete(lock_key)
+                            raise
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("[Reports Poller] Ошибка при опросе Reports API: %s", e)
 
-                    admin_user_id = await _get_default_admin_id(session_maker)
-                    _ACTIVE_TASKS.add(task_id)
-
-                    await generate_reports_article_pipeline_task.kiq(
-                        id_task=task_id,
-                        user_id_str=admin_user_id,
-                        site_key=task.site_key or "",
-                        domain=task.domain or "",
-                        instructions=task.text_comment or "",
-                        sites_limit=4,
-                        topic=task.site_key,
-                    )
-                    logger.info("⚡ [Reports Poller] Задача #%d успешно отправлена в очередь генерации!", task_id)
-
-            else:
-                logger.debug("[Reports Poller] Очередь задач в Reports пуста.")
-
-        except Exception as e:
-            logger.warning("[Reports Poller] Ошибка при опросе Reports API: %s", e)
-
-        await asyncio.sleep(poll_interval_seconds)
+            await asyncio.sleep(poll_interval_seconds)
+    finally:
+        await redis_client.aclose()
