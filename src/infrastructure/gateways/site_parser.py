@@ -32,7 +32,13 @@ _NAV_CHROME_TAGS = frozenset({
 _NAV_ROLES = frozenset({"navigation", "banner", "contentinfo", "menubar", "dialog"})
 
 _NAV_CLASS_PATTERN = re.compile(
-    r"(?:^|[\s_-])(?:navbar|site-header|header-menu|footer|cookie-banner|cookie-popup|cookie-notice)(?:$|[\s_-])",
+    r"(?:^|\s)(?:navbar|site-header|header-menu|site-footer|main-footer|page-footer|footer|"
+    r"cookie-banner|cookie-popup|cookie-notice|cookies?-bar|cookies?-modal)(?=$|\s)",
+    re.I,
+)
+
+_COOKIE_TEXT_RE = re.compile(
+    r"(?:мы используем cookie|использованием файлов cookie|политикой конфиденциальности)",
     re.I,
 )
 
@@ -122,7 +128,20 @@ def _extract_contacts_and_links(
         if len(internal_links) >= 35:
             break
 
-    return {"phones": phones[:4], "emails": emails[:3]}, internal_links
+    chrome_parts: list[str] = []
+    for chrome_tag in soup.find_all(["header", "footer"]):
+        if isinstance(chrome_tag, Tag):
+            txt = re.sub(r"\s+", " ", chrome_tag.get_text(" ", strip=True)).strip()
+            if txt:
+                chrome_parts.append(txt)
+    address_hint = " | ".join(chrome_parts)[:600]
+
+    return {
+        "phones": phones[:4],
+        "emails": emails[:3],
+        "address_hint": address_hint,
+    }, internal_links
+
 
 
 def _is_scrapeable_url(url: str) -> bool:
@@ -146,6 +165,10 @@ def _clean_dom(soup: BeautifulSoup) -> Tag:
 
     for tag in soup.find_all(True):
         if not isinstance(tag, Tag) or not isinstance(tag.attrs, dict):
+            continue
+        if tag.name in ("html", "body", "main", "article"):
+            continue
+        if tag.find(["main", "h1"]):
             continue
 
         role = str(tag.attrs.get("role", "")).lower()
@@ -280,13 +303,30 @@ class SiteParserGateway:
                                 continue
 
                         text = elem.get_text(" ", strip=True)
-                        if len(text) >= 12 and not _GARBAGE_TEXT_PATTERN.match(text):
+                        if (
+                            len(text) >= 12
+                            and not _GARBAGE_TEXT_PATTERN.match(text)
+                            and not _COOKIE_TEXT_RE.search(text)
+                        ):
                             if not paragraphs or paragraphs[-1] != text:
                                 if not any(text in p for p in paragraphs[-3:]):
                                     paragraphs.append(text)
 
                 clean_text_paragraphs = "\n\n".join(paragraphs)
-
+                if len(clean_text_paragraphs) < 250:
+                    raw_lines = [
+                        re.sub(r"\s+", " ", line).strip()
+                        for line in content_root.get_text("\n", strip=True).splitlines()
+                    ]
+                    fallback_lines = [
+                        line for line in raw_lines
+                        if len(line) >= 15
+                        and not _GARBAGE_TEXT_PATTERN.match(line)
+                        and not _COOKIE_TEXT_RE.search(line)
+                    ]
+                    fallback_text = "\n\n".join(dict.fromkeys(fallback_lines))
+                    if len(fallback_text) > len(clean_text_paragraphs):
+                        clean_text_paragraphs = fallback_text
                 md_report = [
                     f"### Title:\n{final_title}\n",
                     f"### Description:\n{final_desc}\n" if final_desc else "",
@@ -326,6 +366,8 @@ class SiteParserGateway:
                     },
                     "body_text": structured_raw_text,
                     "clean_text": clean_text_paragraphs or final_title,
+                    "contacts": contacts,
+                    "internal_links": internal_links,
                     "is_blocked": False
                 }
 
@@ -341,6 +383,8 @@ class SiteParserGateway:
             "content_structure": {"headings": [], "tables": [], "faq_blocks": []},
             "body_text": "",
             "clean_text": "",
+            "contacts": {"phones": [], "emails": []},
+            "internal_links": [],
             "is_blocked": True
         }
 

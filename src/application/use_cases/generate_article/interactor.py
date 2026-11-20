@@ -54,24 +54,27 @@ class GenerateArticleInteractor:
         brand = await self._brand_resolver.resolve(dto.target_site)
         volume = build_volume_target(competitors)
         competitors_block = build_competitors_block(competitors)
-
-        # 3. Генерация черновика
+        site_url = brand.target_site or dto.target_site or ""
         brand_context = brand.brand_fact_sheet.to_prompt_block() if brand.brand_fact_sheet else ""
 
+        # 3. Генерация черновика
         raw_html, reasoning, prompt = await self._draft_generator.generate_draft(
             topic=dto.topic,
             primary_keyword=primary_keyword,
             company_name=brand.company_name,
+            target_site=site_url,
             brand_context=brand_context,
             instructions=dto.instructions,
             volume=volume,
             competitors_block=competitors_block,
         )
+
         # 4. Harness-верификация и самоисправление ДО генерации картинок
         report = await self._verifier.verify_and_refine(
             raw_html,
             topic=dto.topic,
             primary_keyword=primary_keyword,
+            target_site=site_url,
             target_min_chars=volume.min_chars,
             target_max_chars=volume.max_chars,
         )

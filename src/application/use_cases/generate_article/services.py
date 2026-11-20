@@ -218,7 +218,7 @@ class TargetBrandService:
 
         phones = list(dict.fromkeys([*(contacts_main.get("phones") or []), *(contacts_about.get("phones") or [])]))[:4]
         emails = list(dict.fromkeys([*(contacts_main.get("emails") or []), *(contacts_about.get("emails") or [])]))[:3]
-
+        address_hint = contacts_main.get("address_hint") or ""
         # Отбираем ссылки на услуги/разделы (исключая саму about/contacts), максимум 20 кандидатов для LLM
         service_links = [
             lnk for lnk in candidate_links
@@ -231,31 +231,34 @@ class TargetBrandService:
         links_text = "\n".join(f"- {lnk['anchor']} | {lnk['url']}" for lnk in service_links) or "Нет ссылок"
 
         prompt = f"""Извлеки фактическую карточку компании с её сайта ({target_site}).
-ЗАПРЕЩЕНО выдумывать факты, цифры, лицензии или ссылки. Используй ТОЛЬКО то, что есть в тексте ниже.
+                ЗАПРЕЩЕНО выдумывать факты, цифры, лицензии или ссылки. Используй ТОЛЬКО то, что есть в тексте ниже.
 
-TITLE ГЛАВНОЙ: {parsed_main.get("title", "")}
-DESCRIPTION: {parsed_main.get("description", "")}
+                TITLE ГЛАВНОЙ: {parsed_main.get("title", "")}
+                DESCRIPTION: {parsed_main.get("description", "")}
 
-ТЕКСТ ГЛАВНОЙ СТРАНИЦЫ:
-{main_text}
+                ТЕКСТ ГЛАВНОЙ СТРАНИЦЫ:
+                {main_text}
 
-ТЕКСТ СТРАНИЦЫ «О КОМПАНИИ / КОНТАКТЫ»:
-{about_text}
+                ТЕКСТ СТРАНИЦЫ «О КОМПАНИИ / КОНТАКТЫ»:
+                {about_text}
 
-ДОСТУПНЫЕ ВНУТРЕННИЕ ССЫЛКИ ДЛЯ ПЕРЕЛИНКОВКИ:
-{links_text}
+                ШАПКА И ПОДВАЛ САЙТА (адрес, город, слоган):
+                {address_hint}
 
-Верни СТРОГО валидный JSON без markdown-обёрток:
-{{
-  "company_name": "Короткое реальное название бренда/компании без URL (например: ООО «Интех» или Интех)",
-  "city_or_region": "Город или регион работы (пусто, если не указан)",
-  "services_summary": "1-2 предложения: на чём специализируется компания",
-  "usp_and_experience": ["Факт 1: лет на рынке / лицензия / гарантия / сертификат / СРО", "Факт 2..."],
-  "selected_links": [
-    {{"url": "точная ссылка из списка выше", "anchor": "естественный анкор"}}
-  ]
-}}
-В selected_links выбери 3-5 самых полезных страниц смежных услуг/разделов строго из списка выше."""
+                ДОСТУПНЫЕ ВНУТРЕННИЕ ССЫЛКИ ДЛЯ ПЕРЕЛИНКОВКИ:
+                {links_text}
+
+                Верни СТРОГО валидный JSON без markdown-обёрток:
+                {{
+                "company_name": "Короткое реальное название бренда/компании без URL (например: ООО «Интех» или Интех)",
+                "city_or_region": "Город или регион работы (пусто, если не указан)",
+                "services_summary": "1-2 предложения: на чём специализируется компания",
+                "usp_and_experience": ["Факт 1: лет на рынке / лицензия / гарантия / сертификат / СРО", "Факт 2..."],
+                "selected_links": [
+                    {{"url": "точная ссылка из списка выше", "anchor": "естественный анкор"}}
+                ]
+                }}
+                В selected_links выбери 3-5 самых полезных страниц смежных услуг/разделов строго из списка выше."""
 
         try:
             raw = await self._ai.generate_completion(
@@ -325,33 +328,39 @@ class LlmArticleDraftGenerator:
         topic: str,
         primary_keyword: str,
         company_name: str,
-        brand_context: str,
-        instructions: str,
+        target_site: str = "",
+        brand_context: str = "",
+        instructions: str = "",
         volume: ArticleVolumeTarget,
-        competitors_block: str,
+        competitors_block: str = "",
     ) -> tuple[str, str, str]:
+        desc_site_ref = (
+            target_site.strip().rstrip("/")
+            if target_site and target_site.strip()
+            else company_name
+        )
         brand_block = (
             f"\nДАННЫЕ О КОМПАНИИ ЗАКАЗЧИКА (используй реальный город, факты доверия, контакты и перелинковку):\n"
             f"{brand_context}\n"
             if brand_context
             else ""
         )
+
         system_instruction = (
             "Ты — профессиональный Senior SEO-копирайтер. Твоя задача — СРАЗУ выдать ПОЛНЫЙ готовый текст статьи. "
             "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать планы, обещания, комментарии («сейчас напишу», «затем соберу», «я учту»). "
             "Сразу начинай с первого абзаца статьи!"
         )
-        prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'  .
+        prompt = f"""Напиши коммерческую SEO-статью / страницу услуги на тему '{topic}' СПЕЦИАЛЬНО ДЛЯ НАШЕЙ КОМПАНИИ: '{company_name}'.
 
             {volume.prompt_instruction}
-
             {brand_block}
-
             {competitors_block}
             ОБЯЗАТЕЛЬНОЕ ПРАВИЛО ДЛЯ МЕТА-ТЕГОВ:
             • В блоке meta:
-                - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании и без знаков препинания в конце).
-                - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + название компании '{company_name}' + выгоды.
+                - Title: СТРОГО только текст ключа '{primary_keyword}' (без названия компании, URL и знаков препинания в конце).
+                - Description: 140-160 символов, содержит ключ '{primary_keyword}' ровно 1 раз + ОБЯЗАТЕЛЬНО URL сайта '{desc_site_ref}' 
+                (укажи именно URL '{desc_site_ref}', а НЕ словесное название компании) + выгоды.
 
             • ЗАГОЛОВОК H1:
                 - В самом начале статьи (сразу после мета-блока) создай ровно ОДИН тег <h1> с главным ключом '{primary_keyword}'.

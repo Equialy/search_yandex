@@ -23,10 +23,11 @@ class ArticleDraftGenerator(Protocol):
         topic: str,
         primary_keyword: str,
         company_name: str,
+        target_site: str = "",
         brand_context: str = "",
-        instructions: str,
+        instructions: str = "",
         volume: ArticleVolumeTarget,
-        competitors_block: str,
+        competitors_block: str = "",
     ) -> tuple[str, str, str]:
         """Возвращает (raw_html, reasoning, used_prompt)."""
         ...
@@ -39,6 +40,7 @@ class ArticleVerifier(Protocol):
         *,
         topic: str,
         primary_keyword: str,
+        target_site: str = "",
         target_min_chars: int | None = None,
         target_max_chars: int | None = None,
     ) -> VerificationReport: ...

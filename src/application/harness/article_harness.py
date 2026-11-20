@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
+from urllib.parse import urlparse
 from src.api.v1.text_router.schema import CalculateNauseaRequest
 from src.api.v1.text_router.service import TextAiService
 from src.application.article_format import ensure_semantic_html, normalize_article_html
@@ -85,6 +85,7 @@ class ArticleQualityHarness:
         *,
         topic: str,
         primary_keyword: str,
+        target_site: str = "",
         target_min_chars: int | None = None,
         target_max_chars: int | None = None,
     ) -> VerificationReport:
@@ -96,6 +97,7 @@ class ArticleQualityHarness:
             current_html,
             topic=topic,
             primary_keyword=primary_keyword,
+            target_site=target_site,
             min_chars=min_chars,
             max_chars=max_chars,
         )
@@ -122,8 +124,19 @@ class ArticleQualityHarness:
                 )
                 candidate_html = self._sanitize_html(repaired_raw, topic)
             elif best_report.needs_humanize:
-                humanized = await self._text_ai.humanize_text(best_report.html)
-                candidate_html = self._sanitize_html(humanized.humanized_text, topic)
+                style_match = re.search(
+                    r"<style[^>]*>.*?</style>", best_report.html, flags=re.DOTALL | re.IGNORECASE
+                )
+                style_block = style_match.group(0) if style_match else ""
+                markup_only = best_report.html.replace(style_block, "").strip() if style_block else best_report.html
+
+                humanized = await self._text_ai.humanize_text(markup_only)
+                rebuilt = (
+                    f"{style_block}\n\n{humanized.humanized_text}"
+                    if style_block and "<style" not in humanized.humanized_text.lower()
+                    else humanized.humanized_text
+                )
+                candidate_html = self._sanitize_html(rebuilt, topic)
             else:
                 break
 
@@ -131,11 +144,11 @@ class ArticleQualityHarness:
                 candidate_html,
                 topic=topic,
                 primary_keyword=primary_keyword,
+                target_site=target_site,
                 min_chars=min_chars,
                 max_chars=max_chars,
             )
 
-            # Оставляем лучший вариант, чтобы не потерять структуру при неудачном ретрае
             if candidate_report.score >= best_report.score:
                 best_report = candidate_report
 
@@ -156,6 +169,7 @@ class ArticleQualityHarness:
         html: str,
         *,
         topic: str,
+        target_site: str = "",
         primary_keyword: str,
         min_chars: int,
         max_chars: int,
@@ -181,10 +195,21 @@ class ArticleQualityHarness:
             issues.append(
                 f"Description сейчас {len(desc_val)} симв., нужно строго 140–160 символов с главным ключом"
             )
+        if target_site and target_site.strip():
+            site_url_clean = target_site.strip().rstrip("/")
+            domain = urlparse(site_url_clean).netloc.lower().removeprefix("www.") or site_url_clean.lower()
+            if domain and domain not in desc_val.lower():
+                issues.append(
+                    f"В Description обязательно должен быть указан URL сайта '{site_url_clean}' "
+                    f"(а не только название компании). Длина Description должна остаться 140–160 символов."
+                )
+
         if char_count < min_chars:
             issues.append(f"Слишком короткий текст ({char_count} симв.), расширь до минимум {min_chars} символов")
         elif char_count > max_chars:
             issues.append(f"Текст слишком длинный ({char_count} симв.), сократи до {max_chars} символов")
+
+        
 
         # 3. Проверка запрещённых штампов
         lowered_text = clean_text.lower()
